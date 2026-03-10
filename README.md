@@ -1,36 +1,122 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Moneytracker
 
-## Getting Started
+Local-first personal finance dashboard for one user. The app runs entirely in the browser, stores data in IndexedDB, and is being tuned first for ICICI savings and ICICI credit-card statements.
 
-First, run the development server:
+## Current status
+
+This repo now includes:
+
+- a polished Next.js app shell with `Dashboard`, `Upload`, `Transactions`, and `Settings`
+- seeded demo data stored in IndexedDB on first load
+- dashboard charts and KPIs based on canonical local transactions
+- transaction library with sorting, filters, date range filtering, and dashboard/chart drill-downs
+- review queue visibility for uncertain rows
+- upload/import flow for ICICI savings and credit-card PDFs
+- parser support for PDF plus CSV/XLSX ingestion paths
+- sample CSV files in `public/sample-data/`
+
+The core import pipeline is now wired, but review actions, manual tabular mapping UI, and export polish are still incomplete.
+
+## Working with Codex
+
+Future Codex sessions or contributors should read these files first:
+
+1. `AGENTS.md`
+2. `STATE.md`
+3. `DECISIONS.md`
+
+If the task touches imports or parsing, also read `PARSERS.md`.
+
+At the end of a meaningful session, refresh `STATE.md` with:
+
+- what was completed
+- what still needs work
+- blockers
+- next priorities
+
+## Session handoff workflow
+
+- Start of session: read `AGENTS.md`, `STATE.md`, and `DECISIONS.md`
+- During session: make focused changes and verify them
+- End of session: update `STATE.md` with completed work, remaining work, blockers, and next steps
+
+## Simple local setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Start the app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+3. Open [http://localhost:3000](http://localhost:3000)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+4. The demo dataset loads automatically the first time so the dashboard is not empty.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Where weekly uploads will happen
 
-## Learn More
+You do not need to copy weekly statements into the project folder during normal use.
 
-To learn more about Next.js, take a look at the following resources:
+- Open the app
+- Go to `Upload`
+- Drag in the savings or credit-card file from anywhere on your machine
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The browser reads the file locally. Persistent data is stored in IndexedDB.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Private sample fixtures for parser tuning
 
-## Deploy on Vercel
+For development and parser adaptation, keep your real statement files in:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```text
+samples/private/icici/savings/
+samples/private/icici/credit-card/
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+These folders are gitignored so your personal statements do not get committed.
+
+Current real reference PDFs used during parser tuning:
+
+- `CCStatement_Current10-03-2026.pdf`
+- `OpTransactionHistory10-03-2026.pdf`
+
+## Sample files
+
+Repo-safe sample files live in `public/sample-data/`:
+
+- `savings-sample.csv`
+- `credit-card-sample.csv`
+- `savings-sample.xlsx`
+- `credit-card-sample.xlsx`
+
+## Parser adaptation workflow
+
+1. Put real bank files into `samples/private/icici/savings/` or `samples/private/icici/credit-card/`
+2. Update the relevant parser module:
+   - `lib/parsers/pdf/icici-savings-transaction-history.ts`
+   - `lib/parsers/pdf/icici-credit-card-current.ts`
+   - `lib/parsers/tabular/index.ts`
+3. Confirm extracted fields line up with the statement layout:
+   - savings: transaction date, multiline remarks, withdrawal, deposit, balance
+   - credit card: transaction date, details, amount with `Dr.` / `Cr.`, reference number
+4. Normalize rows into the shared transaction schema
+5. Verify repeated month-to-date uploads resolve to one canonical fingerprint per transaction
+
+For more parser-specific notes, assumptions, and verification guidance, use `PARSERS.md`.
+
+## Week and spend logic
+
+- Weeks are Monday to Sunday
+- Dashboard spend totals come from transaction dates, never upload dates
+- Excluded rows such as salary credits, refunds, transfers, and card bill payments stay visible in the ledger but do not count toward spend KPIs by default
+
+## Verification commands
+
+```bash
+npm run lint
+npm run build
+```
