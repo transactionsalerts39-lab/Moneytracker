@@ -9,14 +9,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { getBillingCycleStartDay } from "@/lib/finance";
 import { db, ensureSeedData, resetAllLocalData, setSettingValue } from "@/lib/storage/db";
+import { useViewportMode, type ViewportModePreference } from "@/lib/ui/viewport-mode";
 
 export function SettingsView() {
   const settings = useLiveQuery(() => db.settings.toArray(), []);
   const rules = useLiveQuery(() => db.rules.toArray(), []);
   const mappings = useLiveQuery(() => db.fileMappings.toArray(), []);
+  const { preference, resolvedMode, setPreference } = useViewportMode();
   const showExcluded = Boolean(settings?.find((setting) => setting.key === "showExcludedInCharts")?.value);
   const savedBillingCycleStartDay = getBillingCycleStartDay(settings);
   const [billingCycleStartDayInput, setBillingCycleStartDayInput] = useState(String(savedBillingCycleStartDay));
@@ -55,7 +58,7 @@ export function SettingsView() {
       <section className="flex flex-col gap-4 border-b border-slate-200/70 pb-6 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Settings</p>
-          <h2 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">Control the local rules engine.</h2>
+          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">Control the local rules engine.</h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
             These settings are already backed by local IndexedDB. Rule editing, file-mapping management, and export file
             generation are the next pieces to wire.
@@ -66,7 +69,7 @@ export function SettingsView() {
         </Badge>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-3">
+      <section className="grid gap-4 xl:grid-cols-4">
         <Card className="rounded-[28px] border-slate-200/70 bg-white/90 shadow-none">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -81,6 +84,29 @@ export function SettingsView() {
               <p className="text-xs text-slate-500">Currently seeded as {showExcluded ? "on" : "off"}.</p>
             </div>
             <Switch checked={showExcluded} disabled />
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-[28px] border-slate-200/70 bg-white/90 shadow-none">
+          <CardHeader>
+            <CardTitle>View mode</CardTitle>
+            <CardDescription>Choose auto device detection or force a desktop/mobile layout in this browser only.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 rounded-[24px] bg-slate-50 px-4 py-4">
+            <Select value={preference} onValueChange={(value) => void setPreference((value as ViewportModePreference | undefined) ?? "auto")}>
+              <SelectTrigger className="w-full rounded-xl border-slate-200 bg-white">
+                <SelectValue placeholder="View mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Auto</SelectItem>
+                <SelectItem value="mobile">Mobile</SelectItem>
+                <SelectItem value="desktop">Desktop</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-slate-600">Current resolved view: <span className="font-semibold text-slate-900 capitalize">{resolvedMode}</span>.</p>
+            <p className="text-xs leading-5 text-slate-500">
+              This preference is saved only in the current browser/device. It does not sync across phones and laptops.
+            </p>
           </CardContent>
         </Card>
 

@@ -2,7 +2,7 @@
 
 ## Current status
 
-Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus billing-cycle-aware card totals and improved transactions/upload UX.
+Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus a device-aware mobile UI split, billing-cycle-aware card totals, and improved transactions/upload UX.
 
 ## What is working
 
@@ -16,6 +16,8 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Configurable credit-card billing cycle day stored in IndexedDB settings, with current-cycle totals on the dashboard and transactions screen
 - Transaction sorting directly from the `Date` and `Amount` column headers, plus compact custom date range filtering
 - Multi-file uploads per source type in the upload UI, with separate local batches and overlap-safe canonical dedupe
+- Device-aware UI mode resolution with separate mobile and desktop shells, plus a local-only `Auto / Mobile / Desktop` override saved per browser/device
+- Mobile-specific dashboard and transactions presentations that reuse the same local Dexie data and drill-down/filter logic as desktop
 
 ## What is partially working
 
@@ -25,6 +27,7 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Export actions are scaffolded in Settings but not fully wired
 - Current billing-cycle total now behaves like a gross card bill: it includes credit-card debit rows in the cycle, includes `pending_review` rows, and ignores credits/refunds so they do not reduce the total
 - Delete-latest-batch currently removes transactions created by that batch; it does not yet recompute canonical rows from remaining raw sightings
+- Upload and Settings use the new mobile shell and sizing adjustments, but only Dashboard and Transactions have fully distinct mobile-first layouts in this slice
 
 ## Current blockers
 
@@ -32,6 +35,7 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - No tabular manual mapping fallback UI yet
 - Batch deletion still does not rebuild canonical transactions from retained sightings after removing an overlapping import
 - Batch deletion/rebuild logic is simpler than the intended final overlap reconciliation model
+- Mobile UI currently keys off viewport plus a per-device override; there is still no true cross-device/account sync for view preferences
 
 ## Next 3 priorities
 
@@ -53,4 +57,4 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 
 ## Last updated
 
-2026-03-10
+2026-03-11

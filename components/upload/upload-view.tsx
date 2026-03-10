@@ -73,7 +73,7 @@ export function UploadView() {
       <section className="flex flex-col gap-4 border-b border-slate-200/70 pb-6 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Upload</p>
-          <h2 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">Stage statements with clear separation.</h2>
+          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">Stage statements with clear separation.</h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
             Uploads already parse locally for PDF, CSV, and XLSX. Each file is normalized into the canonical ledger, then
             overlap checks run before anything hits the dashboard totals.
