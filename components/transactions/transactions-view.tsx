@@ -21,6 +21,8 @@ import {
   getBillingCycleWindow,
   getPresetMeta,
   getReviewRows,
+  getTransactionDescriptionLabel,
+  getTransactionMerchantLabel,
   matchesTransactionPreset,
   type TransactionPreset,
 } from "@/lib/finance";
@@ -78,11 +80,15 @@ function useTransactionsData() {
   const availableCategories = Array.from(new Set(transactions.map((transaction) => transaction.category))).sort();
   const filtered = transactions
     .filter((transaction) => {
+      const merchantLabel = getTransactionMerchantLabel(transaction).toLowerCase();
+      const descriptionLabel = getTransactionDescriptionLabel(transaction).toLowerCase();
+      const rawDescription = transaction.description.toLowerCase();
       const matchesPreset = preset ? matchesTransactionPreset(transaction, preset, new Date(), billingCycleStartDay) : true;
       const matchesWeekStart = weekStartFilter ? transaction.weekStart === weekStartFilter : true;
       const matchesSearch =
-        transaction.description.toLowerCase().includes(search.toLowerCase()) ||
-        transaction.merchant.toLowerCase().includes(search.toLowerCase());
+        rawDescription.includes(search.toLowerCase()) ||
+        descriptionLabel.includes(search.toLowerCase()) ||
+        merchantLabel.includes(search.toLowerCase());
       const matchesSource = sourceFilter === "all" || transaction.sourceType === sourceFilter;
       const matchesFlow =
         flowFilter === "all" ||
@@ -281,51 +287,56 @@ function DesktopTransactionsView({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filtered.map((transaction) => (
-                      <TableRow
-                        key={transaction.id}
-                        className={cn(
-                          "cursor-pointer",
-                          transaction.direction === "credit" && "bg-emerald-50/60 hover:bg-emerald-50",
-                        )}
-                        onClick={() => setSelectedTransaction(transaction)}
-                      >
-                        <TableCell>{transaction.date}</TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium text-slate-900">{transaction.merchant}</p>
-                            <p className="text-xs text-slate-500">{transaction.description}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium text-slate-900">{transaction.category}</p>
-                            <p className="text-xs text-slate-500">{getTransactionQualifier(transaction)}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <FlowBadge direction={transaction.direction} />
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className="rounded-full capitalize">
-                            {transaction.sourceType.replace("_", " ")}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge className="rounded-full bg-slate-100 text-slate-700 hover:bg-slate-100">
-                            {transaction.statementFileType.toUpperCase()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell
+                    {filtered.map((transaction) => {
+                      const merchantLabel = getTransactionMerchantLabel(transaction);
+                      const descriptionLabel = getTransactionDescriptionLabel(transaction);
+
+                      return (
+                        <TableRow
+                          key={transaction.id}
                           className={cn(
-                            "text-right font-semibold",
-                            transaction.direction === "credit" ? "text-emerald-700" : "text-slate-900",
+                            "cursor-pointer",
+                            transaction.direction === "credit" && "bg-emerald-50/60 hover:bg-emerald-50",
                           )}
+                          onClick={() => setSelectedTransaction(transaction)}
                         >
-                          {formatSignedAmount(transaction)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                          <TableCell>{transaction.date}</TableCell>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium text-slate-900">{merchantLabel}</p>
+                              <p className="text-xs text-slate-500">{descriptionLabel}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium text-slate-900">{transaction.category}</p>
+                              <p className="text-xs text-slate-500">{getTransactionQualifier(transaction)}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <FlowBadge direction={transaction.direction} />
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className="rounded-full capitalize">
+                              {transaction.sourceType.replace("_", " ")}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge className="rounded-full bg-slate-100 text-slate-700 hover:bg-slate-100">
+                              {transaction.statementFileType.toUpperCase()}
+                            </Badge>
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              "text-right font-semibold",
+                              transaction.direction === "credit" ? "text-emerald-700" : "text-slate-900",
+                            )}
+                          >
+                            {formatSignedAmount(transaction)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -461,44 +472,49 @@ function MobileTransactionsView({
                 {filtered.length === 0 ? (
                   <EmptyStateCard text="No transactions match the current mobile filters." />
                 ) : (
-                  filtered.map((transaction) => (
-                    <button
-                      key={transaction.id}
-                      type="button"
-                      className={cn(
-                        "w-full rounded-[24px] border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-slate-300",
-                        transaction.direction === "credit" && "border-emerald-200 bg-emerald-50/40",
-                      )}
-                      onClick={() => setSelectedTransaction(transaction)}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{transaction.merchant}</p>
-                          <p className="mt-1 text-xs text-slate-500">{transaction.description}</p>
+                  filtered.map((transaction) => {
+                    const merchantLabel = getTransactionMerchantLabel(transaction);
+                    const descriptionLabel = getTransactionDescriptionLabel(transaction);
+
+                    return (
+                      <button
+                        key={transaction.id}
+                        type="button"
+                        className={cn(
+                          "w-full rounded-[24px] border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-slate-300",
+                          transaction.direction === "credit" && "border-emerald-200 bg-emerald-50/40",
+                        )}
+                        onClick={() => setSelectedTransaction(transaction)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{merchantLabel}</p>
+                            <p className="mt-1 text-xs text-slate-500">{descriptionLabel}</p>
+                          </div>
+                          <p
+                            className={cn(
+                              "text-sm font-semibold",
+                              transaction.direction === "credit" ? "text-emerald-700" : "text-slate-900",
+                            )}
+                          >
+                            {formatSignedAmount(transaction)}
+                          </p>
                         </div>
-                        <p
-                          className={cn(
-                            "text-sm font-semibold",
-                            transaction.direction === "credit" ? "text-emerald-700" : "text-slate-900",
-                          )}
-                        >
-                          {formatSignedAmount(transaction)}
-                        </p>
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Badge variant="secondary" className="rounded-full">
-                          {transaction.date}
-                        </Badge>
-                        <Badge variant="secondary" className="rounded-full capitalize">
-                          {transaction.category}
-                        </Badge>
-                        <FlowBadge direction={transaction.direction} />
-                        <Badge variant="secondary" className="rounded-full capitalize">
-                          {transaction.sourceType.replace("_", " ")}
-                        </Badge>
-                      </div>
-                    </button>
-                  ))
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Badge variant="secondary" className="rounded-full">
+                            {transaction.date}
+                          </Badge>
+                          <Badge variant="secondary" className="rounded-full capitalize">
+                            {transaction.category}
+                          </Badge>
+                          <FlowBadge direction={transaction.direction} />
+                          <Badge variant="secondary" className="rounded-full capitalize">
+                            {transaction.sourceType.replace("_", " ")}
+                          </Badge>
+                        </div>
+                      </button>
+                    );
+                  })
                 )}
               </div>
             </CardContent>
@@ -889,6 +905,10 @@ function TransactionDetailSheet({
   setSelectedTransaction: (transaction: Transaction | null) => void;
   side: "right" | "bottom";
 }) {
+  const merchantLabel = selectedTransaction ? getTransactionMerchantLabel(selectedTransaction) : "";
+  const descriptionLabel = selectedTransaction ? getTransactionDescriptionLabel(selectedTransaction) : "";
+  const showRawNarration = Boolean(selectedTransaction && descriptionLabel !== selectedTransaction.description);
+
   return (
     <Sheet open={Boolean(selectedTransaction)} onOpenChange={(open) => (!open ? setSelectedTransaction(null) : null)}>
       <SheetContent
@@ -902,8 +922,9 @@ function TransactionDetailSheet({
         </SheetHeader>
         {selectedTransaction ? (
           <div className="mt-2 space-y-4 px-4 pb-6 text-sm text-slate-600">
-            <DetailRow label="Merchant" value={selectedTransaction.merchant} />
-            <DetailRow label="Description" value={selectedTransaction.description} />
+            <DetailRow label="Merchant" value={merchantLabel} />
+            <DetailRow label="Description" value={descriptionLabel} />
+            {showRawNarration ? <DetailRow label="Raw narration" value={selectedTransaction.description} /> : null}
             <DetailRow label="Category" value={selectedTransaction.category} />
             <DetailRow
               label="Flow"

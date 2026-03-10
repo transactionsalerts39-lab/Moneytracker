@@ -1,3 +1,4 @@
+import { extractUpiDetails } from "@/lib/finance";
 import type { CategorizationRule, SourceType } from "@/types/finance";
 
 type Categorization = {
@@ -36,7 +37,7 @@ export function categorizeTransaction(
 
   if (/credit card payment|card payment|infinity payment received|thank you/i.test(description)) {
     return {
-      merchant: inferMerchant(description),
+      merchant: inferMerchant(description, sourceType),
       category: "Transfer",
       excludedFromSpend: true,
       exclusionReason: "credit_card_payment",
@@ -45,7 +46,7 @@ export function categorizeTransaction(
 
   if (/salary|payment received|refund|tax refund/i.test(description)) {
     return {
-      merchant: inferMerchant(description),
+      merchant: inferMerchant(description, sourceType),
       category: /refund/i.test(description) ? "Refund" : "Income",
       excludedFromSpend: true,
       exclusionReason: /refund/i.test(description) ? "refund" : "salary_credit",
@@ -54,7 +55,7 @@ export function categorizeTransaction(
 
   if (/atm|cash withdrawal/i.test(description)) {
     return {
-      merchant: inferMerchant(description),
+      merchant: inferMerchant(description, sourceType),
       category: "Cash",
       excludedFromSpend: true,
       exclusionReason: "cash_withdrawal",
@@ -63,7 +64,7 @@ export function categorizeTransaction(
 
   if (/igst|markup fee|dcc fee|interest amount|principal amount amortization/i.test(description)) {
     return {
-      merchant: inferMerchant(description),
+      merchant: inferMerchant(description, sourceType),
       category: "Finance Charges",
       excludedFromSpend: false,
     };
@@ -76,7 +77,7 @@ export function categorizeTransaction(
 
   if (matchedRule) {
     return {
-      merchant: inferMerchant(description),
+      merchant: inferMerchant(description, sourceType),
       category: matchedRule.category,
       excludedFromSpend: matchedRule.excludeFromSpend ?? false,
       exclusionReason: matchedRule.excludeFromSpend ? "rule_exclusion" : undefined,
@@ -84,25 +85,33 @@ export function categorizeTransaction(
   }
 
   if (sourceType === "credit_card" && /airline|airbnb|uber|hotel/i.test(description)) {
-    return { merchant: inferMerchant(description), category: "Travel", excludedFromSpend: false };
+    return { merchant: inferMerchant(description, sourceType), category: "Travel", excludedFromSpend: false };
   }
 
   return {
-    merchant: inferMerchant(description),
+    merchant: inferMerchant(description, sourceType),
     category: "Uncategorized",
     excludedFromSpend: false,
   };
 }
 
-function inferMerchant(description: string) {
+function inferMerchant(description: string, sourceType: SourceType) {
   const matched = merchantMatchers.find((entry) => entry.regex.test(description));
 
   if (matched) {
     return matched.merchant;
   }
 
+  if (sourceType === "savings") {
+    const upiDetails = extractUpiDetails(description);
+
+    if (upiDetails?.party) {
+      return upiDetails.party;
+    }
+  }
+
   return description
     .split(/[\/,]/)
     .map((segment) => segment.trim())
-    .find((segment) => segment && !/\d/.test(segment)) || description.slice(0, 40);
+    .find((segment) => segment && !/\d/.test(segment) && !/^upi$/i.test(segment)) || description.slice(0, 40);
 }

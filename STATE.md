@@ -2,7 +2,7 @@
 
 ## Current status
 
-Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus a device-aware mobile UI split, billing-cycle-aware card totals, and improved transactions/upload UX.
+Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus a device-aware mobile UI split, billing-cycle-aware card totals, improved transactions/upload UX, and cleaner savings UPI merchant/display labels.
 
 ## What is working
 
@@ -18,10 +18,11 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Multi-file uploads per source type in the upload UI, with separate local batches and overlap-safe canonical dedupe
 - Device-aware UI mode resolution with separate mobile and desktop shells, plus a local-only `Auto / Mobile / Desktop` override saved per browser/device
 - Mobile-specific dashboard and transactions presentations that reuse the same local Dexie data and drill-down/filter logic as desktop
+- Savings UPI rows now derive a cleaner merchant/counterparty label and shorter display description while preserving raw narration for dedupe and drill-down detail
 
 ## What is partially working
 
-- Savings PDF parser works, but narration extraction still uses layout heuristics and may send more rows to review than ideal
+- Savings PDF parser works, but narration extraction still uses layout heuristics and UPI naming heuristics still need validation against more real statement variants
 - CSV/XLSX imports do not yet have manual column-mapping UI
 - Review queue is visible, but accept/edit/exclude/merge actions are not implemented yet
 - Export actions are scaffolded in Settings but not fully wired
@@ -36,11 +37,12 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Batch deletion still does not rebuild canonical transactions from retained sightings after removing an overlapping import
 - Batch deletion/rebuild logic is simpler than the intended final overlap reconciliation model
 - Mobile UI currently keys off viewport plus a per-device override; there is still no true cross-device/account sync for view preferences
+- No real-sample regression set yet for validating additional ICICI savings UPI narration patterns beyond the current heuristic pass
 
 ## Next 3 priorities
 
 1. Implement review queue actions (`accept`, `edit`, `exclude`, `merge`) so pending rows can feed back into accurate billing/spend totals
-2. Add manual CSV/XLSX column-mapping UI with saved mappings
+2. Validate and extend ICICI savings UPI extraction against a broader set of real narrations, especially person-to-person and refund/collect variants
 3. Strengthen batch deletion and overlap reconciliation using retained raw sightings, not only batch-origin transaction deletion
 
 ## Important files

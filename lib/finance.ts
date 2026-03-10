@@ -2,6 +2,34 @@ import { addMonths, endOfWeek, format, getDay, lastDayOfMonth, parseISO, startOf
 
 import type { ImportBatch, RawImportedRow, Setting, Transaction } from "@/types/finance";
 
+const UPI_GENERIC_TOKENS = new Set([
+  "upi",
+  "p2a",
+  "p2m",
+  "cr",
+  "dr",
+  "pay",
+  "paid",
+  "payment",
+  "payment received",
+  "money transfer",
+  "order payment",
+  "sent using",
+  "sent",
+  "received",
+  "credited",
+  "debited",
+  "collect",
+  "collect request",
+  "mandate",
+  "txn",
+  "txnid",
+  "txn id",
+  "ref",
+  "reference",
+  "salary credit",
+]);
+
 export type TransactionPreset =
   | "spend-this-week"
   | "spend-last-week"
@@ -63,6 +91,71 @@ export function buildFingerprint(sourceType: string, date: string, description: 
 
 export function buildRawHash(batchId: string, index: number, description: string) {
   return `${batchId}-${index}-${normalizeDescription(description).slice(0, 48)}`;
+}
+
+export function extractUpiDetails(description: string) {
+  const compact = description.replace(/\s+/g, " ").trim();
+
+  if (!/\bupi\b/i.test(compact)) {
+    return null;
+  }
+
+  const rawTokens = compact
+    .split(/[\/|]/)
+    .map((token) => sanitizeUpiToken(token))
+    .filter(Boolean);
+  const tokens = rawTokens.length > 1 ? rawTokens : compact.split(/[-:]/).map((token) => sanitizeUpiToken(token)).filter(Boolean);
+  const meaningfulTokens = tokens.filter(isMeaningfulUpiToken);
+
+  if (meaningfulTokens.length === 0) {
+    const handleMatch = compact.match(/([A-Za-z][A-Za-z0-9._-]{1,})@[A-Za-z]{2,}/);
+
+    if (!handleMatch) {
+      return null;
+    }
+
+    return { party: toDisplayCase(handleMatch[1]), context: undefined };
+  }
+
+  const party = meaningfulTokens[0];
+  const context = meaningfulTokens.find((token, index) => index > 0 && !isGenericUpiContext(token));
+
+  return {
+    party: toDisplayCase(party),
+    context: context ? toDisplayCase(context) : undefined,
+  };
+}
+
+export function getTransactionMerchantLabel(transaction: Pick<Transaction, "description" | "merchant" | "sourceType">) {
+  if (transaction.sourceType === "savings") {
+    const upiDetails = extractUpiDetails(transaction.description);
+
+    if (upiDetails?.party) {
+      return upiDetails.party;
+    }
+  }
+
+  return transaction.merchant;
+}
+
+export function getTransactionDescriptionLabel(transaction: Pick<Transaction, "description" | "direction" | "sourceType">) {
+  if (transaction.sourceType !== "savings") {
+    return transaction.description;
+  }
+
+  const upiDetails = extractUpiDetails(transaction.description);
+
+  if (!upiDetails?.party) {
+    return transaction.description;
+  }
+
+  const directionLabel = transaction.direction === "credit" ? "from" : "to";
+
+  if (upiDetails.context) {
+    return `UPI ${directionLabel} ${upiDetails.party} - ${upiDetails.context}`;
+  }
+
+  return `UPI ${directionLabel} ${upiDetails.party}`;
 }
 
 export function getBillingCycleStartDay(settings: Setting[] | undefined, fallback = 25) {
@@ -331,7 +424,9 @@ export function getTopMerchants(transactions: Transaction[]) {
     if (row.excludedFromSpend || row.direction !== "debit" || row.status !== "active") {
       continue;
     }
-    grouped.set(row.merchant, (grouped.get(row.merchant) ?? 0) + Math.abs(row.signedAmount));
+    const merchantLabel = getTransactionMerchantLabel(row);
+
+    grouped.set(merchantLabel, (grouped.get(merchantLabel) ?? 0) + Math.abs(row.signedAmount));
   }
 
   return Array.from(grouped.entries())
@@ -367,7 +462,9 @@ function getTopGroup(rows: Transaction[], key: "category" | "merchant") {
   const grouped = new Map<string, number>();
 
   for (const row of rows) {
-    grouped.set(row[key], (grouped.get(row[key]) ?? 0) + Math.abs(row.signedAmount));
+    const groupKey = key === "merchant" ? getTransactionMerchantLabel(row) : row[key];
+
+    grouped.set(groupKey, (grouped.get(groupKey) ?? 0) + Math.abs(row.signedAmount));
   }
 
   const topEntry = Array.from(grouped.entries()).sort((a, b) => b[1] - a[1])[0];
@@ -376,4 +473,63 @@ function getTopGroup(rows: Transaction[], key: "category" | "merchant") {
     name: topEntry?.[0] ?? "No data",
     amount: topEntry?.[1] ?? 0,
   };
+}
+
+function sanitizeUpiToken(token: string) {
+  return token
+    .trim()
+    .replace(/([A-Za-z][A-Za-z0-9._-]{1,})@[A-Za-z]{2,}/g, "$1")
+    .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function isMeaningfulUpiToken(token: string) {
+  if (!token) {
+    return false;
+  }
+
+  const normalized = token.toLowerCase();
+  const compact = normalized.replace(/\s+/g, " ").trim();
+
+  if (UPI_GENERIC_TOKENS.has(compact)) {
+    return false;
+  }
+
+  if (!/[a-z]/i.test(token)) {
+    return false;
+  }
+
+  if (/^\d+$/.test(token)) {
+    return false;
+  }
+
+  if (compact.length < 3) {
+    return false;
+  }
+
+  if (/^(?:txn|ref|utr|rrn|upi|id)[\s:-]*[a-z0-9-]+$/i.test(token)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isGenericUpiContext(token: string) {
+  const normalized = token.toLowerCase().replace(/\s+/g, " ").trim();
+
+  return UPI_GENERIC_TOKENS.has(normalized);
+}
+
+function toDisplayCase(value: string) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      if (word.length <= 4 && /^[A-Z0-9]+$/.test(word)) {
+        return word;
+      }
+
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(" ");
 }
