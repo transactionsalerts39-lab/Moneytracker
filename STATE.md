@@ -2,7 +2,7 @@
 
 ## Current status
 
-Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus a device-aware mobile UI split, billing-cycle-aware card totals, improved transactions/upload UX, and cleaner savings UPI merchant/display labels.
+Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus a device-aware mobile UI split, billing-cycle-aware card totals, a dashboard-level custom date range filter, improved transactions/upload UX, and cleaner savings UPI merchant/display labels.
 
 ## What is working
 
@@ -29,6 +29,7 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Current billing-cycle total now behaves like a gross card bill: it includes credit-card debit rows in the cycle, includes `pending_review` rows, and ignores credits/refunds so they do not reduce the total
 - Delete-latest-batch currently removes transactions created by that batch; it does not yet recompute canonical rows from remaining raw sightings
 - Upload and Settings use the new mobile shell and sizing adjustments, but only Dashboard and Transactions have fully distinct mobile-first layouts in this slice
+- Dashboard now supports a compact custom `start` / `end` date range filter that keeps the current layout mostly intact while scoping KPI cards, charts, badges, and dashboard-to-transactions drill-down links to the selected window
 
 ## Current blockers
 
@@ -38,11 +39,12 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Batch deletion/rebuild logic is simpler than the intended final overlap reconciliation model
 - Mobile UI currently keys off viewport plus a per-device override; there is still no true cross-device/account sync for view preferences
 - No real-sample regression set yet for validating additional ICICI savings UPI narration patterns beyond the current heuristic pass
+- Dashboard date range is currently session-local UI state; it is not yet persisted to IndexedDB or mirrored into the URL for shareable/reload-stable deep links
 
 ## Next 3 priorities
 
 1. Implement review queue actions (`accept`, `edit`, `exclude`, `merge`) so pending rows can feed back into accurate billing/spend totals
-2. Validate and extend ICICI savings UPI extraction against a broader set of real narrations, especially person-to-person and refund/collect variants
+2. Decide whether the new dashboard date range should persist in IndexedDB or the URL so filtered dashboard views survive refreshes and can deep-link cleanly into Transactions
 3. Strengthen batch deletion and overlap reconciliation using retained raw sightings, not only batch-origin transaction deletion
 
 ## Important files
@@ -59,4 +61,4 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 
 ## Last updated
 
-2026-03-11
+2026-03-16

@@ -185,6 +185,58 @@ export function getBillingCycleWindow(cycleStartDay: number, today = new Date())
   };
 }
 
+export function normalizeDateRange(fromDate?: string, toDate?: string) {
+  const normalizedFrom = fromDate?.trim() ?? "";
+  const normalizedTo = toDate?.trim() ?? "";
+
+  if (normalizedFrom && normalizedTo && normalizedFrom > normalizedTo) {
+    return {
+      fromDate: normalizedTo,
+      toDate: normalizedFrom,
+      isActive: true,
+    };
+  }
+
+  return {
+    fromDate: normalizedFrom,
+    toDate: normalizedTo,
+    isActive: Boolean(normalizedFrom || normalizedTo),
+  };
+}
+
+export function filterTransactionsByDateRange(transactions: Transaction[], fromDate?: string, toDate?: string) {
+  const normalizedRange = normalizeDateRange(fromDate, toDate);
+
+  if (!normalizedRange.isActive) {
+    return transactions;
+  }
+
+  return transactions.filter((transaction) => {
+    const matchesFromDate = !normalizedRange.fromDate || transaction.date >= normalizedRange.fromDate;
+    const matchesToDate = !normalizedRange.toDate || transaction.date <= normalizedRange.toDate;
+
+    return matchesFromDate && matchesToDate;
+  });
+}
+
+export function formatDateRangeLabel(fromDate?: string, toDate?: string) {
+  const normalizedRange = normalizeDateRange(fromDate, toDate);
+
+  if (normalizedRange.fromDate && normalizedRange.toDate) {
+    return `${format(parseISO(normalizedRange.fromDate), "MMM d")} - ${format(parseISO(normalizedRange.toDate), "MMM d")}`;
+  }
+
+  if (normalizedRange.fromDate) {
+    return `From ${format(parseISO(normalizedRange.fromDate), "MMM d, yyyy")}`;
+  }
+
+  if (normalizedRange.toDate) {
+    return `Through ${format(parseISO(normalizedRange.toDate), "MMM d, yyyy")}`;
+  }
+
+  return "All dates";
+}
+
 export function getThisWeekComparisonWindow(today = new Date()) {
   const currentStart = startOfWeek(today, { weekStartsOn: 1 });
   const weekdayIndex = getDay(today) === 0 ? 6 : getDay(today) - 1;
@@ -258,6 +310,29 @@ export function getDashboardMetrics(transactions: Transaction[], billingCycleSta
     topCategory,
     biggestMerchant,
     largestTransaction,
+  };
+}
+
+export function getDashboardDateRangeMetrics(transactions: Transaction[]) {
+  const activeRows = transactions.filter((transaction) => transaction.status === "active");
+  const spendRows = activeRows.filter((transaction) => !transaction.excludedFromSpend && transaction.direction === "debit");
+  const creditRows = activeRows.filter((transaction) => transaction.direction === "credit");
+  const totalCredits = creditRows.reduce((total, row) => total + Math.abs(row.signedAmount), 0);
+  const netFlow = activeRows.reduce((total, row) => total + row.signedAmount, 0);
+
+  return {
+    totalSpend: sumSpend(spendRows),
+    totalCredits,
+    netFlow,
+    savingsSpend: sumSpend(spendRows.filter((row) => row.sourceType === "savings")),
+    creditCardSpend: sumSpend(spendRows.filter((row) => row.sourceType === "credit_card")),
+    transactionCount: transactions.length,
+    pendingReviewCount: transactions.filter((transaction) => transaction.status === "pending_review").length,
+    topCategory: getTopGroup(spendRows, "category"),
+    biggestMerchant: getTopGroup(spendRows, "merchant"),
+    largestTransaction: spendRows.slice().sort((a, b) => Math.abs(b.signedAmount) - Math.abs(a.signedAmount))[0] ?? null,
+    spendTransactionCount: spendRows.length,
+    creditTransactionCount: creditRows.length,
   };
 }
 
