@@ -91,6 +91,14 @@ export type TransactionOverride = {
   updatedAt: string;
 };
 
+export type TransactionAnnotation = {
+  transactionFingerprint: string;
+  note: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Setting = {
   key: string;
   value: string | boolean | number;

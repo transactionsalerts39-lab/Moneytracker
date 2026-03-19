@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { ArrowDown, ArrowUp, ArrowUpDown, CalendarRange, Funnel, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, CalendarRange, ChevronDown, Funnel, MessageSquare, Plus, Search, Tag, X } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { parseISO } from "date-fns";
@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import {
   formatCurrency,
   getBillingCycleStartDay,
@@ -26,10 +27,12 @@ import {
   matchesTransactionPreset,
   type TransactionPreset,
 } from "@/lib/finance";
-import { db } from "@/lib/storage/db";
+import { db, normalizeTransactionAnnotationTags, saveTransactionAnnotation } from "@/lib/storage/db";
 import { useViewportMode } from "@/lib/ui/viewport-mode";
 import { cn } from "@/lib/utils";
-import type { RawImportedRow, Transaction } from "@/types/finance";
+import type { RawImportedRow, Transaction, TransactionAnnotation } from "@/types/finance";
+
+type AnnotationFilter = "all" | "comment" | "tags" | "both";
 
 export function TransactionsView() {
   const { resolvedMode } = useViewportMode();
@@ -47,10 +50,12 @@ function useTransactionsData() {
   const transactions = useLiveQuery(() => db.transactions.orderBy("date").reverse().toArray(), []);
   const rawRows = useLiveQuery(() => db.rawImportedRows.toArray(), []);
   const settings = useLiveQuery(() => db.settings.toArray(), []);
+  const annotations = useLiveQuery(() => db.transactionAnnotations.toArray(), []);
   const [search, setSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState(searchParams.get("source") ?? "all");
   const [flowFilter, setFlowFilter] = useState(searchParams.get("flow") ?? "all");
   const [categoryFilter, setCategoryFilter] = useState(searchParams.get("category") ?? "all");
+  const [annotationFilter, setAnnotationFilter] = useState(normalizeAnnotationFilter(searchParams.get("annotations")));
   const [sortOrder, setSortOrder] = useState("date-desc");
   const [fromDate, setFromDate] = useState(searchParams.get("from") ?? "");
   const [toDate, setToDate] = useState(searchParams.get("to") ?? "");
@@ -58,10 +63,11 @@ function useTransactionsData() {
   const preset = searchParams.get("preset") as TransactionPreset | null;
   const weekStartFilter = searchParams.get("weekStart");
 
-  if (!transactions || !rawRows || !settings) {
+  if (!transactions || !rawRows || !settings || !annotations) {
     return { loading: true as const };
   }
 
+  const annotationsByFingerprint = new Map(annotations.map((annotation) => [annotation.transactionFingerprint, annotation]));
   const billingCycleStartDay = getBillingCycleStartDay(settings);
   const billingCycleWindow = getBillingCycleWindow(billingCycleStartDay);
   const billingCycleSummaryRows = transactions.filter(
@@ -80,21 +86,27 @@ function useTransactionsData() {
   const availableCategories = Array.from(new Set(transactions.map((transaction) => transaction.category))).sort();
   const filtered = transactions
     .filter((transaction) => {
+      const annotation = annotationsByFingerprint.get(transaction.transactionFingerprint);
       const merchantLabel = getTransactionMerchantLabel(transaction).toLowerCase();
       const descriptionLabel = getTransactionDescriptionLabel(transaction).toLowerCase();
       const rawDescription = transaction.description.toLowerCase();
+      const noteText = annotation?.note.toLowerCase() ?? "";
+      const tagText = annotation?.tags.join(" ").toLowerCase() ?? "";
       const matchesPreset = preset ? matchesTransactionPreset(transaction, preset, new Date(), billingCycleStartDay) : true;
       const matchesWeekStart = weekStartFilter ? transaction.weekStart === weekStartFilter : true;
       const matchesSearch =
         rawDescription.includes(search.toLowerCase()) ||
         descriptionLabel.includes(search.toLowerCase()) ||
-        merchantLabel.includes(search.toLowerCase());
+        merchantLabel.includes(search.toLowerCase()) ||
+        noteText.includes(search.toLowerCase()) ||
+        tagText.includes(search.toLowerCase());
       const matchesSource = sourceFilter === "all" || transaction.sourceType === sourceFilter;
       const matchesFlow =
         flowFilter === "all" ||
         (flowFilter === "incoming" && transaction.direction === "credit") ||
         (flowFilter === "outgoing" && transaction.direction === "debit");
       const matchesCategory = categoryFilter === "all" || transaction.category === categoryFilter;
+      const matchesAnnotation = matchesTransactionAnnotationFilter(annotation, annotationFilter);
       const matchesFromDate = !fromDate || transaction.date >= fromDate;
       const matchesToDate = !toDate || transaction.date <= toDate;
 
@@ -105,6 +117,7 @@ function useTransactionsData() {
         matchesSource &&
         matchesFlow &&
         matchesCategory &&
+        matchesAnnotation &&
         matchesFromDate &&
         matchesToDate
       );
@@ -121,6 +134,7 @@ function useTransactionsData() {
     setSourceFilter("all");
     setFlowFilter("all");
     setCategoryFilter("all");
+    setAnnotationFilter("all");
     clearDateFilters();
   };
 
@@ -131,7 +145,7 @@ function useTransactionsData() {
     setToDate(billingCycleWindow.throughDate);
   };
 
-  const activeFilterCount = [sourceFilter !== "all", flowFilter !== "all", categoryFilter !== "all", Boolean(fromDate), Boolean(toDate)].filter(
+  const activeFilterCount = [sourceFilter !== "all", flowFilter !== "all", categoryFilter !== "all", annotationFilter !== "all", Boolean(fromDate), Boolean(toDate)].filter(
     Boolean,
   ).length;
 
@@ -145,6 +159,8 @@ function useTransactionsData() {
     setFlowFilter,
     categoryFilter,
     setCategoryFilter,
+    annotationFilter,
+    setAnnotationFilter,
     sortOrder,
     setSortOrder,
     fromDate,
@@ -157,6 +173,7 @@ function useTransactionsData() {
     weekStartFilter,
     filtered,
     reviewRows,
+    annotationsByFingerprint,
     availableCategories,
     billingCycleStartDay,
     billingCycleWindow,
@@ -178,6 +195,8 @@ function DesktopTransactionsView({
   setFlowFilter,
   categoryFilter,
   setCategoryFilter,
+  annotationFilter,
+  setAnnotationFilter,
   sortOrder,
   setSortOrder,
   fromDate,
@@ -190,6 +209,7 @@ function DesktopTransactionsView({
   weekStartFilter,
   filtered,
   reviewRows,
+  annotationsByFingerprint,
   availableCategories,
   billingCycleStartDay,
   billingCycleWindow,
@@ -226,7 +246,7 @@ function DesktopTransactionsView({
             <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <CardTitle>Transaction library</CardTitle>
-                <CardDescription>Search by merchant or description and drill into the canonical record.</CardDescription>
+                <CardDescription>Search by merchant, description, note, or tag and drill into the canonical record.</CardDescription>
               </div>
               <DesktopFilterRow
                 search={search}
@@ -237,6 +257,8 @@ function DesktopTransactionsView({
                 setFlowFilter={setFlowFilter}
                 categoryFilter={categoryFilter}
                 setCategoryFilter={setCategoryFilter}
+                annotationFilter={annotationFilter}
+                setAnnotationFilter={setAnnotationFilter}
                 availableCategories={availableCategories}
               />
             </CardHeader>
@@ -288,6 +310,7 @@ function DesktopTransactionsView({
                   </TableHeader>
                   <TableBody>
                     {filtered.map((transaction) => {
+                      const annotation = annotationsByFingerprint.get(transaction.transactionFingerprint);
                       const merchantLabel = getTransactionMerchantLabel(transaction);
                       const descriptionLabel = getTransactionDescriptionLabel(transaction);
 
@@ -305,6 +328,7 @@ function DesktopTransactionsView({
                             <div>
                               <p className="font-medium text-slate-900">{merchantLabel}</p>
                               <p className="text-xs text-slate-500">{descriptionLabel}</p>
+                              <TransactionAnnotationBadges annotation={annotation} className="mt-2" />
                             </div>
                           </TableCell>
                           <TableCell>
@@ -352,6 +376,7 @@ function DesktopTransactionsView({
       <TransactionDetailSheet
         selectedTransaction={selectedTransaction}
         setSelectedTransaction={setSelectedTransaction}
+        annotationsByFingerprint={annotationsByFingerprint}
         side="right"
       />
     </div>
@@ -367,6 +392,8 @@ function MobileTransactionsView({
   setFlowFilter,
   categoryFilter,
   setCategoryFilter,
+  annotationFilter,
+  setAnnotationFilter,
   sortOrder,
   setSortOrder,
   fromDate,
@@ -379,6 +406,7 @@ function MobileTransactionsView({
   weekStartFilter,
   filtered,
   reviewRows,
+  annotationsByFingerprint,
   availableCategories,
   billingCycleStartDay,
   billingCycleWindow,
@@ -421,7 +449,7 @@ function MobileTransactionsView({
                 <Input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search merchant or description"
+                  placeholder="Search merchant, note, or tag"
                   className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
                 />
               </div>
@@ -473,6 +501,7 @@ function MobileTransactionsView({
                   <EmptyStateCard text="No transactions match the current mobile filters." />
                 ) : (
                   filtered.map((transaction) => {
+                    const annotation = annotationsByFingerprint.get(transaction.transactionFingerprint);
                     const merchantLabel = getTransactionMerchantLabel(transaction);
                     const descriptionLabel = getTransactionDescriptionLabel(transaction);
 
@@ -512,6 +541,7 @@ function MobileTransactionsView({
                             {transaction.sourceType.replace("_", " ")}
                           </Badge>
                         </div>
+                        <TransactionAnnotationBadges annotation={annotation} className="mt-3" compact />
                       </button>
                     );
                   })
@@ -569,6 +599,18 @@ function MobileTransactionsView({
                 </SelectContent>
               </Select>
 
+              <Select value={annotationFilter} onValueChange={(value) => setAnnotationFilter((value as AnnotationFilter | null) ?? "all")}>
+                <SelectTrigger className="w-full rounded-2xl border-slate-200 sm:col-span-2">
+                  <SelectValue placeholder="Notes and tags" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All notes/tags</SelectItem>
+                  <SelectItem value="comment">With comment</SelectItem>
+                  <SelectItem value="tags">With tags</SelectItem>
+                  <SelectItem value="both">With both</SelectItem>
+                </SelectContent>
+              </Select>
+
               <Select value={sortOrder} onValueChange={(value) => setSortOrder(value ?? "date-desc")}>
                 <SelectTrigger className="w-full rounded-2xl border-slate-200 sm:col-span-2">
                   <SelectValue placeholder="Sort" />
@@ -618,6 +660,7 @@ function MobileTransactionsView({
       <TransactionDetailSheet
         selectedTransaction={selectedTransaction}
         setSelectedTransaction={setSelectedTransaction}
+        annotationsByFingerprint={annotationsByFingerprint}
         side="bottom"
       />
     </div>
@@ -646,7 +689,7 @@ function TransactionsHeader({
           Inspect the canonical ledger.
         </h2>
         <p className={cn("mt-3 max-w-2xl text-sm leading-6 text-slate-600", compact && "max-w-none")}>
-          Search, filter, and review the canonical IndexedDB ledger without changing how desktop behaves.
+          Search, filter, tag, and review the canonical IndexedDB ledger without changing how desktop behaves.
         </p>
       </div>
       <div className="flex gap-2">
@@ -668,6 +711,8 @@ function DesktopFilterRow({
   setFlowFilter,
   categoryFilter,
   setCategoryFilter,
+  annotationFilter,
+  setAnnotationFilter,
   availableCategories,
 }: {
   search: string;
@@ -678,6 +723,8 @@ function DesktopFilterRow({
   setFlowFilter: (value: string) => void;
   categoryFilter: string;
   setCategoryFilter: (value: string) => void;
+  annotationFilter: AnnotationFilter;
+  setAnnotationFilter: (value: AnnotationFilter) => void;
   availableCategories: string[];
 }) {
   return (
@@ -685,7 +732,7 @@ function DesktopFilterRow({
       <Input
         value={search}
         onChange={(event) => setSearch(event.target.value)}
-        placeholder="Search merchant or description"
+        placeholder="Search merchant, note, or tag"
         className="w-full rounded-2xl border-slate-200 md:w-72"
       />
       <Select value={sourceFilter} onValueChange={(value) => setSourceFilter(value ?? "all")}>
@@ -719,6 +766,17 @@ function DesktopFilterRow({
               {category}
             </SelectItem>
           ))}
+        </SelectContent>
+      </Select>
+      <Select value={annotationFilter} onValueChange={(value) => setAnnotationFilter((value as AnnotationFilter | null) ?? "all")}>
+        <SelectTrigger className="w-full rounded-2xl border-slate-200 md:w-44">
+          <SelectValue placeholder="Notes/tags" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All notes/tags</SelectItem>
+          <SelectItem value="comment">With comment</SelectItem>
+          <SelectItem value="tags">With tags</SelectItem>
+          <SelectItem value="both">With both</SelectItem>
         </SelectContent>
       </Select>
     </div>
@@ -896,17 +954,60 @@ function ReviewQueueCard({ reviewRows, compact }: { reviewRows: RawImportedRow[]
   );
 }
 
+function TransactionAnnotationBadges({
+  annotation,
+  className,
+  compact = false,
+}: {
+  annotation?: TransactionAnnotation;
+  className?: string;
+  compact?: boolean;
+}) {
+  if (!annotation || (!annotation.note && annotation.tags.length === 0)) {
+    return null;
+  }
+
+  const visibleTags = annotation.tags.slice(0, compact ? 2 : 3);
+  const hiddenTagCount = annotation.tags.length - visibleTags.length;
+
+  return (
+    <div className={cn("flex flex-wrap gap-1.5", className)}>
+      {annotation.note ? (
+        <Badge variant="secondary" className="rounded-full bg-slate-100 text-slate-600 hover:bg-slate-100">
+          <MessageSquare className="size-3" />
+          Note
+        </Badge>
+      ) : null}
+      {visibleTags.map((tag) => (
+        <Badge key={tag} variant="outline" className="rounded-full border-slate-200 bg-white text-slate-600">
+          #{tag}
+        </Badge>
+      ))}
+      {hiddenTagCount > 0 ? (
+        <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-500">
+          +{hiddenTagCount}
+        </Badge>
+      ) : null}
+    </div>
+  );
+}
+
 function TransactionDetailSheet({
   selectedTransaction,
   setSelectedTransaction,
+  annotationsByFingerprint,
   side,
 }: {
   selectedTransaction: Transaction | null;
   setSelectedTransaction: (transaction: Transaction | null) => void;
+  annotationsByFingerprint: Map<string, TransactionAnnotation>;
   side: "right" | "bottom";
 }) {
   const merchantLabel = selectedTransaction ? getTransactionMerchantLabel(selectedTransaction) : "";
   const descriptionLabel = selectedTransaction ? getTransactionDescriptionLabel(selectedTransaction) : "";
+  const selectedAnnotation = selectedTransaction
+    ? annotationsByFingerprint.get(selectedTransaction.transactionFingerprint)
+    : undefined;
   const showRawNarration = Boolean(selectedTransaction && descriptionLabel !== selectedTransaction.description);
 
   return (
@@ -922,19 +1023,66 @@ function TransactionDetailSheet({
         </SheetHeader>
         {selectedTransaction ? (
           <div className="mt-2 space-y-4 px-4 pb-6 text-sm text-slate-600">
-            <DetailRow label="Merchant" value={merchantLabel} />
-            <DetailRow label="Description" value={descriptionLabel} />
-            {showRawNarration ? <DetailRow label="Raw narration" value={selectedTransaction.description} /> : null}
-            <DetailRow label="Category" value={selectedTransaction.category} />
-            <DetailRow
-              label="Flow"
-              value={selectedTransaction.direction === "credit" ? "Incoming transaction" : "Outgoing transaction"}
+            <div className="rounded-[28px] border border-slate-200 bg-slate-50/90 px-4 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">{selectedTransaction.date}</p>
+                  <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{merchantLabel}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">{descriptionLabel}</p>
+                </div>
+                <p
+                  className={cn(
+                    "text-lg font-semibold",
+                    selectedTransaction.direction === "credit" ? "text-emerald-700" : "text-slate-900",
+                  )}
+                >
+                  {formatSignedAmount(selectedTransaction)}
+                </p>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Badge variant="secondary" className="rounded-full bg-white text-slate-700">
+                  {selectedTransaction.category}
+                </Badge>
+                <FlowBadge direction={selectedTransaction.direction} />
+                <Badge variant="secondary" className="rounded-full bg-white capitalize text-slate-700">
+                  {selectedTransaction.sourceType.replace("_", " ")}
+                </Badge>
+                <Badge variant="secondary" className="rounded-full bg-white capitalize text-slate-700">
+                  {selectedTransaction.status.replace("_", " ")}
+                </Badge>
+              </div>
+            </div>
+            <TransactionAnnotationEditor
+              key={`${selectedTransaction.transactionFingerprint}:${selectedAnnotation?.updatedAt ?? "new"}`}
+              selectedTransaction={selectedTransaction}
+              selectedAnnotation={selectedAnnotation}
             />
-            <DetailRow label="Source" value={selectedTransaction.sourceType.replace("_", " ")} />
-            <DetailRow label="Statement file" value={selectedTransaction.statementFileType.toUpperCase()} />
-            <DetailRow label="Week bucket" value={selectedTransaction.weekLabel} />
-            <DetailRow label="Amount" value={formatSignedAmount(selectedTransaction)} />
-            <DetailRow label="Status" value={selectedTransaction.status} />
+            <details className="group rounded-[24px] border border-slate-200 bg-white px-4 py-4">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-left">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">More details</p>
+                  <p className="mt-1 text-xs text-slate-500">Import metadata and raw statement text.</p>
+                </div>
+                <div className="rounded-full bg-slate-100 p-2 text-slate-500 transition group-open:rotate-180">
+                  <ChevronDown className="size-4" />
+                </div>
+              </summary>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <CompactMetaBlock label="Statement file" value={selectedTransaction.statementFileType.toUpperCase()} />
+                <CompactMetaBlock label="Week bucket" value={selectedTransaction.weekLabel} />
+                <CompactMetaBlock
+                  label="Flow"
+                  value={selectedTransaction.direction === "credit" ? "Incoming transaction" : "Outgoing transaction"}
+                />
+                <CompactMetaBlock label="Status" value={selectedTransaction.status.replace("_", " ")} />
+              </div>
+              {showRawNarration ? (
+                <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Raw narration</p>
+                  <p className="mt-1 font-medium text-slate-900">{selectedTransaction.description}</p>
+                </div>
+              ) : null}
+            </details>
           </div>
         ) : null}
       </SheetContent>
@@ -942,7 +1090,172 @@ function TransactionDetailSheet({
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function TransactionAnnotationEditor({
+  selectedTransaction,
+  selectedAnnotation,
+}: {
+  selectedTransaction: Transaction;
+  selectedAnnotation?: TransactionAnnotation;
+}) {
+  const [draftNote, setDraftNote] = useState(selectedAnnotation?.note ?? "");
+  const [draftTags, setDraftTags] = useState<string[]>(selectedAnnotation?.tags ?? []);
+  const [draftTagInput, setDraftTagInput] = useState("");
+  const [saveState, setSaveState] = useState<"idle" | "saved" | "error">("idle");
+  const normalizedDraftTags = normalizeTransactionAnnotationTags(draftTags);
+  const storedTags = normalizeTransactionAnnotationTags(selectedAnnotation?.tags ?? []);
+  const hasChanges =
+    draftNote.trim() !== (selectedAnnotation?.note ?? "") || !areStringArraysEqual(normalizedDraftTags, storedTags);
+
+  const handleAddTags = () => {
+    const nextTags = mergeDraftAnnotationTags(draftTags, draftTagInput);
+
+    if (nextTags.length === draftTags.length) {
+      setDraftTagInput("");
+      return;
+    }
+
+    setDraftTags(nextTags);
+    setDraftTagInput("");
+    setSaveState("idle");
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    setDraftTags((currentTags) => currentTags.filter((tag) => tag !== tagToRemove));
+    setSaveState("idle");
+  };
+
+  const handleReset = () => {
+    setDraftNote(selectedAnnotation?.note ?? "");
+    setDraftTags(selectedAnnotation?.tags ?? []);
+    setDraftTagInput("");
+    setSaveState("idle");
+  };
+
+  const handleSave = async () => {
+    try {
+      await saveTransactionAnnotation({
+        transactionFingerprint: selectedTransaction.transactionFingerprint,
+        note: draftNote,
+        tags: draftTags,
+      });
+      setDraftNote((currentNote) => currentNote.trim());
+      setDraftTags(normalizedDraftTags);
+      setDraftTagInput("");
+      setSaveState("saved");
+    } catch {
+      setSaveState("error");
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Comment and tags</p>
+          <p className="mt-1 text-sm text-slate-600">Saved to this transaction and shown back in your transaction list and search.</p>
+        </div>
+        <div className="rounded-2xl bg-slate-100 p-2 text-slate-600">
+          <Tag className="size-4" />
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        <div className="space-y-2">
+          <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500" htmlFor="transaction-note">
+            Comment
+          </label>
+          <Textarea
+            id="transaction-note"
+            value={draftNote}
+            onChange={(event) => {
+              setDraftNote(event.target.value);
+              setSaveState("idle");
+            }}
+            placeholder="Add a quick note for this transaction."
+            className="min-h-20 rounded-2xl border-slate-200 bg-slate-50 text-sm"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500" htmlFor="transaction-tag-input">
+            Tags
+          </label>
+          <div className="flex gap-2">
+            <Input
+              id="transaction-tag-input"
+              value={draftTagInput}
+              onChange={(event) => {
+                setDraftTagInput(event.target.value);
+                setSaveState("idle");
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === ",") {
+                  event.preventDefault();
+                  handleAddTags();
+                }
+              }}
+              placeholder="Type a tag and press Enter"
+              className="rounded-2xl border-slate-200"
+            />
+            <Button type="button" variant="outline" className="rounded-2xl border-slate-200" onClick={handleAddTags}>
+              <Plus className="size-4" />
+              Add
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {draftTags.length === 0 ? (
+              <p className="text-sm text-slate-500">No tags yet.</p>
+            ) : (
+              draftTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-700"
+                >
+                  #{tag}
+                  <button
+                    type="button"
+                    className="rounded-full p-0.5 text-slate-400 transition hover:bg-white hover:text-slate-700"
+                    onClick={() => handleRemoveTag(tag)}
+                    aria-label={`Remove ${tag} tag`}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p
+            className={cn(
+              "text-xs font-medium",
+              saveState === "error" ? "text-rose-600" : saveState === "saved" ? "text-emerald-600" : "text-slate-500",
+            )}
+          >
+            {saveState === "error"
+              ? "Could not save your comment or tags."
+              : saveState === "saved"
+                ? "Saved. You will see it on this transaction in the list."
+                : hasChanges
+                  ? "Unsaved changes."
+                  : "Clear both comment and tags, then save to remove them."}
+          </p>
+          <div className="flex gap-2">
+            <Button type="button" variant="ghost" className="rounded-2xl" onClick={handleReset} disabled={!hasChanges}>
+              Reset
+            </Button>
+            <Button type="button" className="rounded-2xl" onClick={handleSave} disabled={!hasChanges}>
+              Save
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompactMetaBlock({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl bg-slate-50 px-4 py-3">
       <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{label}</p>
@@ -968,6 +1281,52 @@ function FlowBadge({ direction }: { direction: Transaction["direction"] }) {
       {direction === "credit" ? "Incoming" : "Outgoing"}
     </Badge>
   );
+}
+
+function mergeDraftAnnotationTags(existingTags: string[], rawInput: string) {
+  const inputTags = rawInput
+    .split(/[\n,]/)
+    .map((tag) => tag.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  if (inputTags.length === 0) {
+    return existingTags;
+  }
+
+  return normalizeTransactionAnnotationTags([...existingTags, ...inputTags]);
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
+}
+
+function matchesTransactionAnnotationFilter(annotation: TransactionAnnotation | undefined, annotationFilter: AnnotationFilter) {
+  const hasComment = Boolean(annotation?.note.trim());
+  const hasTags = Boolean(annotation?.tags.length);
+
+  switch (annotationFilter) {
+    case "comment":
+      return hasComment;
+    case "tags":
+      return hasTags;
+    case "both":
+      return hasComment && hasTags;
+    case "all":
+    default:
+      return true;
+  }
+}
+
+function normalizeAnnotationFilter(value: string | null): AnnotationFilter {
+  if (value === "comment" || value === "tags" || value === "both") {
+    return value;
+  }
+
+  return "all";
 }
 
 function formatSignedAmount(transaction: Transaction) {

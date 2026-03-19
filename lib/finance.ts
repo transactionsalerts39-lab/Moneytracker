@@ -256,6 +256,7 @@ export function getDashboardMetrics(transactions: Transaction[], billingCycleSta
       transaction.direction === "debit" &&
       transaction.status === "active",
   );
+  const incomeRows = getIncomeAnalyticsRows(transactions);
   const now = new Date();
   const { currentStart, lastStart, weekdayIndex } = getThisWeekComparisonWindow(now);
   const currentEnd = new Date(currentStart);
@@ -273,6 +274,7 @@ export function getDashboardMetrics(transactions: Transaction[], billingCycleSta
     return date >= lastStart && date <= lastEnd;
   });
   const mtdRows = spendRows.filter((row) => parseISO(row.date) >= monthStart);
+  const mtdIncomeRows = incomeRows.filter((row) => parseISO(row.date) >= monthStart);
 
   const currentWeek = sumSpend(currentWeekRows);
   const lastWeek = sumSpend(lastWeekRows);
@@ -299,6 +301,8 @@ export function getDashboardMetrics(transactions: Transaction[], billingCycleSta
     lastWeek,
     wowChange: lastWeek === 0 ? 0 : ((currentWeek - lastWeek) / lastWeek) * 100,
     monthToDate: sumSpend(mtdRows),
+    incomeThisMonth: sumIncoming(mtdIncomeRows),
+    incomeTransactionCount: mtdIncomeRows.length,
     savingsSpend,
     creditCardSpend,
     currentBillingCycle: {
@@ -315,14 +319,17 @@ export function getDashboardMetrics(transactions: Transaction[], billingCycleSta
 
 export function getDashboardDateRangeMetrics(transactions: Transaction[]) {
   const spendRows = getSpendAnalyticsRows(transactions, true);
-  const creditRows = transactions.filter((transaction) => transaction.direction === "credit");
-  const totalCredits = creditRows.reduce((total, row) => total + Math.abs(row.signedAmount), 0);
-  const netFlow = creditRows.reduce((total, row) => total + Math.abs(row.signedAmount), 0) - sumSpend(spendRows);
+  const incomingRows = transactions.filter((transaction) => transaction.direction === "credit");
+  const incomeRows = getIncomeAnalyticsRows(transactions);
+  const totalIncomingCredits = sumIncoming(incomingRows);
+  const netFlow = totalIncomingCredits - sumSpend(spendRows);
 
   return {
     totalSpend: sumSpend(spendRows),
-    totalCredits,
+    totalIncomingCredits,
     netFlow,
+    incomeTotal: sumIncoming(incomeRows),
+    incomeTransactionCount: incomeRows.length,
     savingsSpend: sumSpend(spendRows.filter((row) => row.sourceType === "savings")),
     creditCardSpend: sumSpend(spendRows.filter((row) => row.sourceType === "credit_card")),
     transactionCount: transactions.length,
@@ -331,7 +338,6 @@ export function getDashboardDateRangeMetrics(transactions: Transaction[]) {
     biggestMerchant: getTopGroup(spendRows, "merchant"),
     largestTransaction: spendRows.slice().sort((a, b) => Math.abs(b.signedAmount) - Math.abs(a.signedAmount))[0] ?? null,
     spendTransactionCount: spendRows.length,
-    creditTransactionCount: creditRows.length,
   };
 }
 
@@ -511,6 +517,10 @@ function sumSpend(rows: Transaction[]) {
   return rows.reduce((total, row) => total + Math.abs(row.signedAmount), 0);
 }
 
+function sumIncoming(rows: Transaction[]) {
+  return rows.reduce((total, row) => total + Math.abs(row.signedAmount), 0);
+}
+
 function getSpendAnalyticsRows(transactions: Transaction[], includePendingReview = false) {
   return transactions.filter((transaction) => {
     if (transaction.direction !== "debit" || transaction.excludedFromSpend) {
@@ -523,6 +533,15 @@ function getSpendAnalyticsRows(transactions: Transaction[], includePendingReview
 
     return includePendingReview && transaction.status === "pending_review";
   });
+}
+
+function getIncomeAnalyticsRows(transactions: Transaction[]) {
+  return transactions.filter(
+    (transaction) =>
+      transaction.direction === "credit" &&
+      transaction.category === "Income" &&
+      transaction.status === "active",
+  );
 }
 
 function clampBillingCycleStartDay(day: number) {

@@ -152,6 +152,15 @@ function useDashboardData() {
           matchingCount: rangeMetrics.spendTransactionCount,
         },
         {
+          label: "Income in range",
+          value: formatCurrency(rangeMetrics.incomeTotal),
+          icon: ArrowUpRight,
+          tone: "text-emerald-600",
+          href: buildTransactionsHref({ flow: "incoming", category: "Income" }),
+          detail: "Active income only",
+          matchingCount: rangeMetrics.incomeTransactionCount,
+        },
+        {
           label: "Expense transactions",
           value: `${rangeMetrics.spendTransactionCount}`,
           icon: Sparkles,
@@ -235,6 +244,15 @@ function useDashboardData() {
           matchingCount: transactions.filter((transaction) =>
             matchesTransactionPreset(transaction, "month-to-date", new Date(), billingCycleStartDay),
           ).length,
+        },
+        {
+          label: "Income this month",
+          value: formatCurrency(metrics.incomeThisMonth),
+          icon: ArrowUpRight,
+          tone: "text-emerald-600",
+          href: "/transactions?flow=incoming&category=Income",
+          detail: "Active income only",
+          matchingCount: metrics.incomeTransactionCount,
         },
         {
           label: "Savings spend",
@@ -418,15 +436,15 @@ function DesktopDashboardView({
                 <InsightRow
                   label="Income in range"
                   value={
-                    rangeMetrics.creditTransactionCount > 0
-                      ? `${formatCurrency(rangeMetrics.totalCredits)} • ${rangeMetrics.creditTransactionCount} incoming transactions`
-                      : "No incoming money in this window"
+                    rangeMetrics.incomeTransactionCount > 0
+                      ? `${formatCurrency(rangeMetrics.incomeTotal)} • ${rangeMetrics.incomeTransactionCount} income transactions`
+                      : "No income in this window"
                   }
                 />
                 <InsightRow
                   label="Net cash impact"
                   value={
-                    rangeMetrics.totalCredits > 0 || rangeMetrics.totalSpend > 0
+                    rangeMetrics.totalIncomingCredits > 0 || rangeMetrics.totalSpend > 0
                       ? `${formatCurrency(rangeMetrics.netFlow)} • credits minus spend`
                       : "No cash movement in this window"
                   }
@@ -617,15 +635,15 @@ function MobileDashboardView({
               <InsightRow
                 label="Income in range"
                 value={
-                  rangeMetrics.creditTransactionCount > 0
-                    ? `${formatCurrency(rangeMetrics.totalCredits)} • ${rangeMetrics.creditTransactionCount} incoming`
-                    : "No incoming money"
+                  rangeMetrics.incomeTransactionCount > 0
+                    ? `${formatCurrency(rangeMetrics.incomeTotal)} • ${rangeMetrics.incomeTransactionCount} income`
+                    : "No income"
                 }
               />
               <InsightRow
                 label="Net cash impact"
                 value={
-                  rangeMetrics.totalCredits > 0 || rangeMetrics.totalSpend > 0
+                  rangeMetrics.totalIncomingCredits > 0 || rangeMetrics.totalSpend > 0
                     ? `${formatCurrency(rangeMetrics.netFlow)} • credits minus spend`
                     : "No cash movement"
                 }

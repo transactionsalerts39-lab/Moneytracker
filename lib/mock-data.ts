@@ -4,6 +4,7 @@ import type {
   ImportBatch,
   RawImportedRow,
   Setting,
+  TransactionAnnotation,
   Transaction,
 } from "@/types/finance";
 import {
@@ -470,6 +471,23 @@ export const mockTransactions: Transaction[] = [
     statementPeriodStart: "2026-02-25",
     statementPeriodEnd: "2026-03-10",
   }),
+];
+
+export const mockTransactionAnnotations: TransactionAnnotation[] = [
+  {
+    transactionFingerprint: buildFingerprint("savings", "2026-03-03", "UPI / Zomato / Order payment", -469.4),
+    note: "Team lunch that should stay visible when reimbursements come in later.",
+    tags: ["reimbursable", "work"],
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    transactionFingerprint: buildFingerprint("savings", "2026-03-04", "NEFT Rent Payment", -22000),
+    note: "March apartment rent.",
+    tags: ["fixed cost", "housing"],
+    createdAt: now,
+    updatedAt: now,
+  },
 ];
 
 export const mockRawRows: RawImportedRow[] = [

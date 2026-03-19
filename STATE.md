@@ -2,7 +2,7 @@
 
 ## Current status
 
-Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus a device-aware mobile UI split, billing-cycle-aware card totals, a dashboard-level custom date range filter, preserved uploaded statement copies in IndexedDB, auto-detected single-entry uploads, upload/settings storage visibility, improved transactions/upload UX, and cleaner savings UPI merchant/display labels.
+Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus a device-aware mobile UI split, billing-cycle-aware card totals, a dashboard-level custom date range filter, preserved uploaded statement copies in IndexedDB, auto-detected single-entry uploads, upload/settings storage visibility, improved transactions/upload UX, cleaner savings UPI merchant/display labels, durable transaction notes/tags stored against canonical fingerprints, and income-specific analytics cards.
 
 ## What is working
 
@@ -23,6 +23,11 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Device-aware UI mode resolution with separate mobile and desktop shells, plus a local-only `Auto / Mobile / Desktop` override saved per browser/device
 - Mobile-specific dashboard and transactions presentations that reuse the same local Dexie data and drill-down/filter logic as desktop
 - Savings UPI rows now derive a cleaner merchant/counterparty label and shorter display description while preserving raw narration for dedupe and drill-down detail
+- Transactions can now store one local note plus multiple free-form local tags in IndexedDB annotations keyed by `transactionFingerprint`, so metadata survives reloads and overlapping reimports
+- Transaction search now matches note/tag metadata, the ledger surfaces note/tag badges on desktop and mobile, and the transaction detail sheet allows local note/tag editing
+- Transaction detail now leads with a compact summary, keeps comment/tags immediately accessible, and hides lower-value import metadata behind a single expandable details section
+- Transactions can now also be filtered directly by annotation state on desktop and mobile (`With comment`, `With tags`, `With both`) so annotated rows are easy to isolate without relying on search text
+- Dashboard analytics now expose dedicated income KPIs (`Income this month` and `Income in range`) using only active transactions categorized as `Income`, while net cash impact still uses all incoming credits where appropriate
 
 ## What is partially working
 
@@ -35,6 +40,7 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Delete-latest-batch also removes the archived source-file copy for that batch, but still does not recompute canonical rows from retained overlapping sightings
 - Upload and Settings use the new mobile shell and sizing adjustments, but only Dashboard and Transactions have fully distinct mobile-first layouts in this slice
 - Dashboard now supports a compact pill-style custom date range filter that opens a small popover with a single-month range calendar, supports click-to-select start/end dates with highlighted spans, collapses back down, and drives an expense-first custom-range dashboard; debit spend cards and charts can include `pending_review` rows while incoming money is summarized separately in the signal board
+- Notes/tags are manual-only metadata in this slice; there are no tag filters, saved views, rule-based auto-tagging, or budget/reporting flows built on top of them yet
 
 ## Current blockers
 
@@ -47,12 +53,13 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Dashboard date range is currently session-local UI state; it is not yet persisted to IndexedDB or mirrored into the URL for shareable/reload-stable deep links
 - Archived source files currently load directly from IndexedDB in the browser UI; there is no retention policy yet for pruning older preserved file copies when storage pressure grows
 - Auto-detect currently targets the known ICICI savings/credit-card formats and tabular header shapes; genuinely ambiguous tabular files still fail cleanly instead of asking the user which source type to use
+- The new transaction-annotation table can outlive a deleted canonical row until that fingerprint appears again or local data is reset; batch-deletion/rebuild logic still needs the broader overlap-reconciliation rewrite before annotation cleanup can be fully canonical-aware
 
 ## Next 3 priorities
 
-1. Implement review queue actions (`accept`, `edit`, `exclude`, `merge`) so pending rows can feed back into accurate billing/spend totals
-2. Strengthen batch deletion and overlap reconciliation using retained raw sightings, not only batch-origin transaction deletion, so deleting a batch/archive copy does not discard still-supported canonical history
-3. Add archive retention controls and storage-management UX for preserved statement files (keep all vs prune older copies, archived-file size warnings, optional manual cleanup)
+1. Implement review queue actions (`accept`, `edit`, `exclude`, `merge`) so pending rows can feed back into accurate billing/spend totals and income KPIs
+2. Strengthen batch deletion and overlap reconciliation using retained raw sightings, not only batch-origin transaction deletion, so deleting a batch/archive copy does not discard still-supported canonical history or strand annotation metadata
+3. Extend the new annotation layer into actual organization workflows: tag filters/saved views first, then budgeting/reporting slices built on categories plus tags
 
 ## Important files
 
