@@ -13,15 +13,17 @@ import {
 } from "@/lib/finance";
 import { parseIciciCreditCardPdf } from "@/lib/parsers/pdf/icici-credit-card-current";
 import { parseIciciSavingsPdf } from "@/lib/parsers/pdf/icici-savings-transaction-history";
-import { parseTabularFile } from "@/lib/parsers/tabular";
+import { parseAutoDetectedTabularFile, parseTabularFile } from "@/lib/parsers/tabular";
 import { db, deleteLatestImportBatch, getSettingValue, replaceDemoDataWithEmptyWorkspace, setSettingValue } from "@/lib/storage/db";
 import { categorizeTransaction } from "@/lib/rules/categorize";
+import type { ParseResult } from "@/lib/parsers/types";
 import type {
   CategorizationRule,
   ImportBatch,
   RawImportedRow,
   SourceType,
   StatementFileType,
+  StoredStatementFile,
   Transaction,
 } from "@/types/finance";
 
@@ -31,9 +33,10 @@ type ImportResult = {
   duplicatesSkipped: number;
   reviewCount: number;
   message: string;
+  sourceType: SourceType;
 };
 
-export async function importStatementFile(file: File, sourceType: SourceType): Promise<ImportResult> {
+export async function importStatementFile(file: File, sourceType?: SourceType): Promise<ImportResult> {
   const fileType = detectFileType(file.name);
 
   if (!fileType) {
@@ -44,23 +47,20 @@ export async function importStatementFile(file: File, sourceType: SourceType): P
     await replaceDemoDataWithEmptyWorkspace();
   }
 
-  const parserResult =
-    fileType === "pdf"
-      ? sourceType === "credit_card"
-        ? await parseIciciCreditCardPdf(file)
-        : await parseIciciSavingsPdf(file)
-      : await parseTabularFile(file, sourceType);
-
-  const batchId = `batch-${sourceType}-${Date.now()}`;
+  const resolvedImport = await resolveImportSource(file, fileType, sourceType);
+  const resolvedSourceType = resolvedImport.sourceType;
+  const parserResult = resolvedImport.parserResult;
+  const batchId = `batch-${resolvedSourceType}-${Date.now()}`;
   const uploadedAt = new Date().toISOString();
 
   if (parserResult.status === "failed") {
     const failedBatch: ImportBatch = {
       id: batchId,
       uploadedAt,
-      sourceType,
+      sourceType: resolvedSourceType,
       fileName: file.name,
       fileType,
+      fileSizeBytes: file.size,
       statementPeriodStart: parserResult.statementPeriodStart,
       statementPeriodEnd: parserResult.statementPeriodEnd,
       totalRawRows: 0,
@@ -75,6 +75,17 @@ export async function importStatementFile(file: File, sourceType: SourceType): P
     };
 
     await db.importBatches.put(failedBatch);
+    await db.storedStatementFiles.put(
+      buildStoredStatementFile({
+        batchId,
+        uploadedAt,
+        sourceType: resolvedSourceType,
+        file,
+        fileType,
+        statementPeriodStart: parserResult.statementPeriodStart,
+        statementPeriodEnd: parserResult.statementPeriodEnd,
+      }),
+    );
 
     return {
       batch: failedBatch,
@@ -82,6 +93,7 @@ export async function importStatementFile(file: File, sourceType: SourceType): P
       duplicatesSkipped: 0,
       reviewCount: 0,
       message: parserResult.message ?? "Import failed.",
+      sourceType: resolvedSourceType,
     };
   }
 
@@ -99,7 +111,7 @@ export async function importStatementFile(file: File, sourceType: SourceType): P
     const normalized = normalizeRow({
       batchId,
       row,
-      sourceType,
+      sourceType: resolvedSourceType,
       fileType,
       rules,
       index,
@@ -113,7 +125,7 @@ export async function importStatementFile(file: File, sourceType: SourceType): P
         id: `${batchId}-raw-${index}`,
         batchId,
         rowIndex: index,
-        sourceType,
+        sourceType: resolvedSourceType,
         rawText: row.description ?? "",
         rawHash: buildRawHash(batchId, index, row.description ?? ""),
         parserId: parserResult.parserId,
@@ -135,7 +147,7 @@ export async function importStatementFile(file: File, sourceType: SourceType): P
         id: `${batchId}-raw-${index}`,
         batchId,
         rowIndex: index,
-        sourceType,
+        sourceType: resolvedSourceType,
         rawText: row.description ?? "",
         rawHash: buildRawHash(batchId, index, row.description ?? ""),
         parserId: parserResult.parserId,
@@ -167,7 +179,7 @@ export async function importStatementFile(file: File, sourceType: SourceType): P
       id: `${batchId}-raw-${index}`,
       batchId,
       rowIndex: index,
-      sourceType,
+      sourceType: resolvedSourceType,
       rawText: row.description ?? "",
       rawHash: normalized.rawRowHash,
       parserId: parserResult.parserId,
@@ -189,9 +201,10 @@ export async function importStatementFile(file: File, sourceType: SourceType): P
   const batch: ImportBatch = {
     id: batchId,
     uploadedAt,
-    sourceType,
+    sourceType: resolvedSourceType,
     fileName: file.name,
     fileType,
+    fileSizeBytes: file.size,
     statementPeriodStart: parserResult.statementPeriodStart,
     statementPeriodEnd: parserResult.statementPeriodEnd,
     totalRawRows: parserResult.rows.length,
@@ -206,6 +219,17 @@ export async function importStatementFile(file: File, sourceType: SourceType): P
   };
 
   await db.importBatches.put(batch);
+  await db.storedStatementFiles.put(
+    buildStoredStatementFile({
+      batchId,
+      uploadedAt,
+      sourceType: resolvedSourceType,
+      file,
+      fileType,
+      statementPeriodStart: parserResult.statementPeriodStart,
+      statementPeriodEnd: parserResult.statementPeriodEnd,
+    }),
+  );
   if (rawRows.length > 0) {
     await db.rawImportedRows.bulkPut(rawRows);
   }
@@ -219,7 +243,8 @@ export async function importStatementFile(file: File, sourceType: SourceType): P
     storedTransactions: toStore.length,
     duplicatesSkipped,
     reviewCount,
-    message: parserResult.message ?? `Imported ${toStore.length} rows from ${file.name}.`,
+    message: parserResult.message ?? `Imported ${toStore.length} net-new rows from ${file.name}.`,
+    sourceType: resolvedSourceType,
   };
 }
 
@@ -349,4 +374,99 @@ function toIsoDate(value: string) {
   }
 
   return format(new Date(`${match[3]}-${match[2]}-${match[1]}T00:00:00`), "yyyy-MM-dd");
+}
+
+function buildStoredStatementFile({
+  batchId,
+  uploadedAt,
+  sourceType,
+  file,
+  fileType,
+  statementPeriodStart,
+  statementPeriodEnd,
+}: {
+  batchId: string;
+  uploadedAt: string;
+  sourceType: SourceType;
+  file: File;
+  fileType: StatementFileType;
+  statementPeriodStart?: string;
+  statementPeriodEnd?: string;
+}) {
+  return {
+    id: `${batchId}-file`,
+    batchId,
+    uploadedAt,
+    sourceType,
+    fileName: file.name,
+    fileType,
+    mimeType: file.type || getMimeTypeFromFileType(fileType),
+    sizeBytes: file.size,
+    lastModified: file.lastModified,
+    statementPeriodStart,
+    statementPeriodEnd,
+    blob: file.slice(0, file.size, file.type || getMimeTypeFromFileType(fileType)),
+  } satisfies StoredStatementFile;
+}
+
+function getMimeTypeFromFileType(fileType: StatementFileType) {
+  switch (fileType) {
+    case "pdf":
+      return "application/pdf";
+    case "csv":
+      return "text/csv";
+    case "xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  }
+}
+
+async function resolveImportSource(
+  file: File,
+  fileType: StatementFileType,
+  sourceType?: SourceType,
+): Promise<{ sourceType: SourceType; parserResult: ParseResult }> {
+  if (sourceType) {
+    return {
+      sourceType,
+      parserResult:
+        fileType === "pdf"
+          ? sourceType === "credit_card"
+            ? await parseIciciCreditCardPdf(file)
+            : await parseIciciSavingsPdf(file)
+          : await parseTabularFile(file, sourceType),
+    };
+  }
+
+  if (fileType !== "pdf") {
+    const autoDetected = await parseAutoDetectedTabularFile(file);
+
+    if (!autoDetected.sourceType) {
+      throw new Error(autoDetected.parserResult.message ?? "Could not auto-detect the statement type for this tabular file.");
+    }
+
+    return {
+      sourceType: autoDetected.sourceType,
+      parserResult: autoDetected.parserResult,
+    };
+  }
+
+  const creditCardResult = await parseIciciCreditCardPdf(file);
+
+  if (creditCardResult.status !== "failed") {
+    return {
+      sourceType: "credit_card",
+      parserResult: creditCardResult,
+    };
+  }
+
+  const savingsResult = await parseIciciSavingsPdf(file);
+
+  if (savingsResult.status !== "failed") {
+    return {
+      sourceType: "savings",
+      parserResult: savingsResult,
+    };
+  }
+
+  throw new Error("Could not auto-detect whether this statement belongs to savings or credit-card imports.");
 }

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { useLiveQuery } from "dexie-react-hooks";
-import { FileText, UploadCloud } from "lucide-react";
+import { Download, Eye, FileText, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { importStatementFile, removeLatestImportBatch } from "@/lib/ingestion/import-statement";
 import { getBatchHeadline } from "@/lib/finance";
 import { db } from "@/lib/storage/db";
-import type { SourceType, UploadDraft } from "@/types/finance";
+import type { UploadDraft } from "@/types/finance";
 
 function detectFileType(file: File): UploadDraft["fileType"] {
   if (file.name.toLowerCase().endsWith(".pdf")) return "pdf";
@@ -23,25 +23,23 @@ function detectFileType(file: File): UploadDraft["fileType"] {
 
 export function UploadView() {
   const importBatches = useLiveQuery(() => db.importBatches.orderBy("uploadedAt").reverse().toArray(), []);
+  const storedStatementFiles = useLiveQuery(() => db.storedStatementFiles.orderBy("uploadedAt").reverse().toArray(), []);
   const [drafts, setDrafts] = useState<UploadDraft[]>([]);
-  const [loadingBySource, setLoadingBySource] = useState<Record<SourceType, boolean>>({
-    savings: false,
-    credit_card: false,
-  });
-  const [pendingFilesBySource, setPendingFilesBySource] = useState<Record<SourceType, number>>({
-    savings: 0,
-    credit_card: 0,
-  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [pendingFileCount, setPendingFileCount] = useState(0);
   const [lastMessage, setLastMessage] = useState<string | null>(null);
+  const importBatchById = new Map((importBatches ?? []).map((batch) => [batch.id, batch]));
+  const totalArchivedSize = (storedStatementFiles ?? []).reduce((total, file) => total + file.sizeBytes, 0);
 
-  async function processFiles(sourceType: SourceType, files: File[]) {
-    setLoadingBySource((current) => ({ ...current, [sourceType]: true }));
-    setPendingFilesBySource((current) => ({ ...current, [sourceType]: files.length }));
+  async function processFiles(files: File[]) {
+    setIsLoading(true);
+    setPendingFileCount(files.length);
 
     for (const file of files) {
+      const draftId = `auto-${file.name}-${file.lastModified}`;
       const draft: UploadDraft = {
-        id: `${sourceType}-${file.name}-${file.lastModified}`,
-        sourceType,
+        id: draftId,
+        sourceType: "auto",
         fileName: file.name,
         fileType: detectFileType(file),
         fileSize: file.size,
@@ -51,21 +49,24 @@ export function UploadView() {
       setDrafts((current) => [draft, ...current]);
 
       try {
-        const result = await importStatementFile(file, sourceType);
+        const result = await importStatementFile(file);
+        setDrafts((current) =>
+          current.map((entry) => (entry.id === draftId ? { ...entry, sourceType: result.sourceType } : entry)),
+        );
         setLastMessage(result.message);
-        toast.success(`${sourceType === "savings" ? "Savings" : "Credit-card"} file imported`, {
-          description: `${result.storedTransactions} rows stored • ${result.duplicatesSkipped} duplicates skipped • ${result.reviewCount} in review`,
+        toast.success(`${result.sourceType === "savings" ? "Savings" : "Credit-card"} file imported`, {
+          description: `${result.storedTransactions} net new rows • ${result.duplicatesSkipped} exact overlaps • file copy saved locally`,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Import failed.";
         setLastMessage(message);
-        toast.error(`${sourceType === "savings" ? "Savings" : "Credit-card"} import failed`, { description: message });
+        toast.error("Statement import failed", { description: message });
       } finally {
-        setPendingFilesBySource((current) => ({ ...current, [sourceType]: Math.max(current[sourceType] - 1, 0) }));
+        setPendingFileCount((current) => Math.max(current - 1, 0));
       }
     }
 
-    setLoadingBySource((current) => ({ ...current, [sourceType]: false }));
+    setIsLoading(false);
   }
 
   return (
@@ -76,7 +77,8 @@ export function UploadView() {
           <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">Stage statements with clear separation.</h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
             Uploads already parse locally for PDF, CSV, and XLSX. Each file is normalized into the canonical ledger, then
-            overlap checks run before anything hits the dashboard totals.
+            overlap checks run before anything hits the dashboard totals. The original uploaded statement is also preserved
+            inside IndexedDB, so deleting the filesystem PDF later does not remove imported history.
           </p>
         </div>
         <Badge className="rounded-full bg-slate-900 px-3 py-1 text-white hover:bg-slate-900">
@@ -84,20 +86,13 @@ export function UploadView() {
         </Badge>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-2">
+      <section>
         <UploadDropzone
-          title="Savings Account File"
-          description="ICICI savings PDF/CSV/XLSX uploads land here."
-          isLoading={loadingBySource.savings}
-          pendingFileCount={pendingFilesBySource.savings}
-          onDropFiles={(files) => processFiles("savings", files)}
-        />
-        <UploadDropzone
-          title="Credit Card File"
-          description="ICICI credit-card statements and exports land here."
-          isLoading={loadingBySource.credit_card}
-          pendingFileCount={pendingFilesBySource.credit_card}
-          onDropFiles={(files) => processFiles("credit_card", files)}
+          title="Statement File"
+          description="Drop ICICI savings or credit-card PDF/CSV/XLSX files here; the app auto-detects the statement type."
+          isLoading={isLoading}
+          pendingFileCount={pendingFileCount}
+          onDropFiles={processFiles}
         />
       </section>
 
@@ -105,7 +100,10 @@ export function UploadView() {
         <Card className="rounded-[28px] border-slate-200/70 bg-white/90 shadow-none">
           <CardHeader>
             <CardTitle>Latest staged files</CardTitle>
-            <CardDescription>Each selected file becomes its own local import batch before canonical dedupe is applied.</CardDescription>
+            <CardDescription>
+              Each selected file becomes its own local import batch before canonical dedupe is applied, then its source
+              copy is archived in IndexedDB.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {drafts.length === 0 ? (
@@ -116,7 +114,9 @@ export function UploadView() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">{draft.fileName}</p>
-                      <p className="mt-1 text-xs text-slate-500">{draft.sourceType.replace("_", " ")}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {draft.sourceType === "auto" ? "auto-detecting statement type" : draft.sourceType.replace("_", " ")}
+                      </p>
                     </div>
                     <Badge variant="secondary" className="rounded-full uppercase">
                       {draft.fileType}
@@ -137,7 +137,8 @@ export function UploadView() {
             ) : null}
             <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
               Exact overlaps are skipped using the canonical fingerprint: source, date, normalized description, and signed
-              amount. Near-duplicates stay visible in the review queue instead of being auto-merged.
+              amount. Near-duplicates stay visible in the review queue instead of being auto-merged, and only net-new
+              canonical rows are added.
             </div>
           </CardContent>
         </Card>
@@ -145,7 +146,9 @@ export function UploadView() {
         <Card className="rounded-[28px] border-slate-200/70 bg-white/90 shadow-none">
           <CardHeader>
             <CardTitle>Recent import batches</CardTitle>
-            <CardDescription>Multiple uploads are stored as separate batches, then reconciled against the shared ledger.</CardDescription>
+            <CardDescription>
+              Multiple uploads are stored as separate batches, then reconciled against the shared ledger with explicit net-new counts.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {importBatches?.map((batch) => (
@@ -154,6 +157,9 @@ export function UploadView() {
                   <div>
                     <p className="text-sm font-semibold text-slate-900">{batch.fileName}</p>
                     <p className="mt-1 text-xs text-slate-500">{getBatchHeadline(batch)}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {batch.fileType.toUpperCase()} • {formatBytes(batch.fileSizeBytes ?? 0)}
+                    </p>
                     <p className="mt-1 text-xs text-slate-400">{new Date(batch.uploadedAt).toLocaleString("en-IN")}</p>
                   </div>
                   <div className="flex gap-2">
@@ -172,7 +178,7 @@ export function UploadView() {
 
                         if (removed) {
                           toast.success("Latest batch deleted", {
-                            description: `${removed.fileName} was removed from local storage.`,
+                            description: `${removed.fileName}, its archived file copy, and its batch data were removed from this browser.`,
                           });
                         }
                       }}
@@ -183,6 +189,74 @@ export function UploadView() {
                 </div>
               </div>
             ))}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section>
+        <Card className="rounded-[28px] border-slate-200/70 bg-white/90 shadow-none">
+          <CardHeader>
+            <CardTitle>Preserved statement archive</CardTitle>
+            <CardDescription>
+              {storedStatementFiles?.length
+                ? `${storedStatementFiles.length} file copies saved in IndexedDB • ${formatBytes(totalArchivedSize)} archived locally`
+                : "New uploads will keep a local statement copy here, separate from the canonical ledger."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!storedStatementFiles || storedStatementFiles.length === 0 ? (
+              <EmptyState text="Once you upload a statement, its original file copy will be preserved locally so you can reopen or download it later." />
+            ) : (
+              storedStatementFiles.map((storedFile) => {
+                const batch = importBatchById.get(storedFile.batchId);
+
+                return (
+                  <div key={storedFile.id} className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{storedFile.fileName}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {storedFile.sourceType.replace("_", " ")} • {storedFile.fileType.toUpperCase()} • {formatBytes(storedFile.sizeBytes)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {batch
+                            ? `${batch.rowsImported} net new rows • ${batch.duplicatesSkipped} exact overlaps • ${batch.rowsFlaggedForReview} review`
+                            : "Archived file copy preserved locally"}
+                        </p>
+                        {storedFile.statementPeriodStart || storedFile.statementPeriodEnd ? (
+                          <p className="mt-1 text-xs text-slate-400">
+                            Statement window {storedFile.statementPeriodStart ?? "?"} to {storedFile.statementPeriodEnd ?? "?"}
+                          </p>
+                        ) : null}
+                        <p className="mt-1 text-xs text-slate-400">{new Date(storedFile.uploadedAt).toLocaleString("en-IN")}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        {storedFile.fileType === "pdf" ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full border-slate-200"
+                            onClick={() => openStoredStatementFile(storedFile)}
+                          >
+                            <Eye className="mr-2 size-4" />
+                            Open copy
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-full border-slate-200"
+                          onClick={() => downloadStoredStatementFile(storedFile)}
+                        >
+                          <Download className="mr-2 size-4" />
+                          Download copy
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </CardContent>
         </Card>
       </section>
@@ -245,7 +319,7 @@ function UploadDropzone({
           <p className="mt-2 text-sm text-slate-500">
             {isLoading
               ? "Parsing, normalizing, deduplicating, and saving each file into IndexedDB in sequence."
-              : "Each file is handled as its own batch, so overlapping month-to-date uploads can be safely reimported."}
+              : "Each file is handled as its own batch, auto-routed to savings or credit-card parsing, and safely deduplicated against earlier uploads."}
           </p>
           <Button className="mt-5 rounded-full bg-slate-900 px-5 text-white hover:bg-slate-800">
             {isLoading ? "Processing..." : "Choose files"}
@@ -265,4 +339,45 @@ function EmptyState({ text }: { text: string }) {
       <p className="mt-4 max-w-sm text-sm text-slate-500">{text}</p>
     </div>
   );
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  const units = ["KB", "MB", "GB"];
+  let size = value / 1024;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function downloadStoredStatementFile(file: {
+  blob: Blob;
+  fileName: string;
+}) {
+  const objectUrl = URL.createObjectURL(file.blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = objectUrl;
+  anchor.download = file.fileName;
+  anchor.click();
+
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
+
+function openStoredStatementFile(file: {
+  blob: Blob;
+  fileType: "pdf" | "csv" | "xlsx";
+}) {
+  const objectUrl = URL.createObjectURL(file.blob);
+
+  window.open(objectUrl, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }

@@ -16,6 +16,7 @@ import type {
   ImportBatch,
   RawImportedRow,
   Setting,
+  StoredStatementFile,
   Transaction,
   TransactionOverride,
 } from "@/types/finance";
@@ -28,6 +29,7 @@ class MoneytrackerDatabase extends Dexie {
   overrides!: Table<TransactionOverride, string>;
   settings!: Table<Setting, string>;
   fileMappings!: Table<FileMapping, string>;
+  storedStatementFiles!: Table<StoredStatementFile, string>;
 
   constructor() {
     super("moneytracker-db");
@@ -41,6 +43,18 @@ class MoneytrackerDatabase extends Dexie {
       overrides: "id, transactionId, updatedAt",
       settings: "key",
       fileMappings: "id, sourceType, headerSignature",
+    });
+
+    this.version(2).stores({
+      importBatches: "id, uploadedAt, sourceType, status",
+      rawImportedRows: "id, batchId, sourceType, needsReview",
+      transactions:
+        "id, date, sourceType, category, excludedFromSpend, needsReview, statementFileType, weekStart, monthStart, status",
+      rules: "id, keyword, priority",
+      overrides: "id, transactionId, updatedAt",
+      settings: "key",
+      fileMappings: "id, sourceType, headerSignature",
+      storedStatementFiles: "id, batchId, uploadedAt, sourceType, fileType",
     });
   }
 }
@@ -66,6 +80,7 @@ export async function replaceDemoDataWithEmptyWorkspace() {
   await db.importBatches.clear();
   await db.rawImportedRows.clear();
   await db.transactions.clear();
+  await db.storedStatementFiles.clear();
   await db.settings.put({ key: "demoMode", value: false });
   await db.settings.put({ key: "seeded", value: true });
 }
@@ -78,6 +93,7 @@ export async function resetAllLocalData() {
   await db.overrides.clear();
   await db.settings.clear();
   await db.fileMappings.clear();
+  await db.storedStatementFiles.clear();
 }
 
 export async function getSettingValue<T extends string | boolean | number>(key: string) {
@@ -102,6 +118,7 @@ export async function deleteLatestImportBatch(sourceType?: "savings" | "credit_c
     (transaction) => transaction.originBatchId === batch.id,
   );
   await Promise.all(createdTransactions.map((transaction) => db.transactions.delete(transaction.id)));
+  await db.storedStatementFiles.where("batchId").equals(batch.id).delete();
 
   await db.importBatches.delete(batch.id);
 

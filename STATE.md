@@ -2,7 +2,7 @@
 
 ## Current status
 
-Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus a device-aware mobile UI split, billing-cycle-aware card totals, a dashboard-level custom date range filter, improved transactions/upload UX, and cleaner savings UPI merchant/display labels.
+Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus a device-aware mobile UI split, billing-cycle-aware card totals, a dashboard-level custom date range filter, preserved uploaded statement copies in IndexedDB, auto-detected single-entry uploads, upload/settings storage visibility, improved transactions/upload UX, and cleaner savings UPI merchant/display labels.
 
 ## What is working
 
@@ -16,6 +16,10 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Configurable credit-card billing cycle day stored in IndexedDB settings, with current-cycle totals on the dashboard and transactions screen
 - Transaction sorting directly from the `Date` and `Amount` column headers, plus compact custom date range filtering
 - Multi-file uploads per source type in the upload UI, with separate local batches and overlap-safe canonical dedupe
+- Uploaded statement files are now preserved as IndexedDB Blob copies linked to each import batch, so imported data remains usable even if the original filesystem PDF/CSV/XLSX is deleted later
+- Upload now uses a single dropzone and auto-detects `savings` vs `credit_card` statements before routing them through the correct PDF/tabular parser path
+- Upload now surfaces net-new canonical rows versus exact overlaps for each batch, plus a preserved statement archive with reopen/download access to historical local copies
+- Settings now shows browser storage usage/quota estimates, archived statement-copy size, and live counts for canonical transactions, raw rows, and import batches
 - Device-aware UI mode resolution with separate mobile and desktop shells, plus a local-only `Auto / Mobile / Desktop` override saved per browser/device
 - Mobile-specific dashboard and transactions presentations that reuse the same local Dexie data and drill-down/filter logic as desktop
 - Savings UPI rows now derive a cleaner merchant/counterparty label and shorter display description while preserving raw narration for dedupe and drill-down detail
@@ -28,8 +32,9 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Export actions are scaffolded in Settings but not fully wired
 - Current billing-cycle total now behaves like a gross card bill: it includes credit-card debit rows in the cycle, includes `pending_review` rows, and ignores credits/refunds so they do not reduce the total
 - Delete-latest-batch currently removes transactions created by that batch; it does not yet recompute canonical rows from remaining raw sightings
+- Delete-latest-batch also removes the archived source-file copy for that batch, but still does not recompute canonical rows from retained overlapping sightings
 - Upload and Settings use the new mobile shell and sizing adjustments, but only Dashboard and Transactions have fully distinct mobile-first layouts in this slice
-- Dashboard now supports a compact custom `start` / `end` date range filter that keeps the current layout mostly intact while scoping KPI cards, charts, badges, and dashboard-to-transactions drill-down links to the selected window
+- Dashboard now supports a compact pill-style custom date range filter that opens a small popover with a single-month range calendar, supports click-to-select start/end dates with highlighted spans, collapses back down, and drives an expense-first custom-range dashboard; debit spend cards and charts can include `pending_review` rows while incoming money is summarized separately in the signal board
 
 ## Current blockers
 
@@ -40,12 +45,14 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Mobile UI currently keys off viewport plus a per-device override; there is still no true cross-device/account sync for view preferences
 - No real-sample regression set yet for validating additional ICICI savings UPI narration patterns beyond the current heuristic pass
 - Dashboard date range is currently session-local UI state; it is not yet persisted to IndexedDB or mirrored into the URL for shareable/reload-stable deep links
+- Archived source files currently load directly from IndexedDB in the browser UI; there is no retention policy yet for pruning older preserved file copies when storage pressure grows
+- Auto-detect currently targets the known ICICI savings/credit-card formats and tabular header shapes; genuinely ambiguous tabular files still fail cleanly instead of asking the user which source type to use
 
 ## Next 3 priorities
 
 1. Implement review queue actions (`accept`, `edit`, `exclude`, `merge`) so pending rows can feed back into accurate billing/spend totals
-2. Decide whether the new dashboard date range should persist in IndexedDB or the URL so filtered dashboard views survive refreshes and can deep-link cleanly into Transactions
-3. Strengthen batch deletion and overlap reconciliation using retained raw sightings, not only batch-origin transaction deletion
+2. Strengthen batch deletion and overlap reconciliation using retained raw sightings, not only batch-origin transaction deletion, so deleting a batch/archive copy does not discard still-supported canonical history
+3. Add archive retention controls and storage-management UX for preserved statement files (keep all vs prune older copies, archived-file size warnings, optional manual cleanup)
 
 ## Important files
 
@@ -59,6 +66,10 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - `lib/finance.ts`
 - `lib/storage/db.ts`
 
+## Environment notes
+
+- Vercel CLI auth token is currently exported from `~/.zshrc` as `VERCEL_TOKEN`; if deploys fail with missing credentials, check that file first rather than bash profile files.
+
 ## Last updated
 
-2026-03-16
+2026-03-19

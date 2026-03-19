@@ -15,6 +15,35 @@ type DetectedMapping = {
 
 export async function parseTabularFile(file: File, sourceType: SourceType): Promise<ParseResult> {
   const records = file.name.toLowerCase().endsWith(".csv") ? await parseCsv(file) : await parseWorkbook(file);
+  const parsed = buildTabularParseResult(records, file.name, sourceType);
+
+  return parsed;
+}
+
+export async function parseAutoDetectedTabularFile(file: File): Promise<{ sourceType: SourceType | null; parserResult: ParseResult }> {
+  const records = file.name.toLowerCase().endsWith(".csv") ? await parseCsv(file) : await parseWorkbook(file);
+  const headers = Object.keys(records[0] ?? {});
+  const detectedSourceType = detectSourceType(headers, file.name);
+
+  if (!detectedSourceType) {
+    return {
+      sourceType: null,
+      parserResult: {
+        parserId: "tabular-auto-mapping",
+        status: "failed",
+        message: "Could not auto-detect whether this tabular file belongs to savings or credit-card imports.",
+        rows: [],
+      },
+    };
+  }
+
+  return {
+    sourceType: detectedSourceType,
+    parserResult: buildTabularParseResult(records, file.name, detectedSourceType),
+  };
+}
+
+function buildTabularParseResult(records: Record<string, unknown>[], fileName: string, sourceType: SourceType): ParseResult {
   const headers = Object.keys(records[0] ?? {});
   const mapping = autoDetectMapping(headers, sourceType);
 
@@ -49,7 +78,7 @@ export async function parseTabularFile(file: File, sourceType: SourceType): Prom
   return {
     parserId: "tabular-auto-mapping",
     status: "success",
-    message: `Parsed ${rows.length} rows from ${file.name}.`,
+    message: `Parsed ${rows.length} rows from ${fileName}.`,
     rows,
   };
 }
@@ -109,6 +138,40 @@ function autoDetectMapping(headers: string[], sourceType: SourceType): DetectedM
 
   if (sourceType === "savings" && savingsMapping.date && savingsMapping.description && (savingsMapping.debit || savingsMapping.credit)) {
     return savingsMapping;
+  }
+
+  return null;
+}
+
+function detectSourceType(headers: string[], fileName: string): SourceType | null {
+  const loweredFileName = fileName.toLowerCase();
+  const hasSavingsMapping = Boolean(autoDetectMapping(headers, "savings"));
+  const hasCreditCardMapping = Boolean(autoDetectMapping(headers, "credit_card"));
+
+  if (hasSavingsMapping && !hasCreditCardMapping) {
+    return "savings";
+  }
+
+  if (hasCreditCardMapping && !hasSavingsMapping) {
+    return "credit_card";
+  }
+
+  if (hasSavingsMapping && hasCreditCardMapping) {
+    if (loweredFileName.includes("credit") || loweredFileName.includes("card") || loweredFileName.includes("cc")) {
+      return "credit_card";
+    }
+
+    if (loweredFileName.includes("savings") || loweredFileName.includes("account")) {
+      return "savings";
+    }
+
+    const normalizedHeaders = headers.map((header) => header.toLowerCase().trim());
+
+    if (normalizedHeaders.some((header) => header.includes("withdrawal") || header.includes("deposit"))) {
+      return "savings";
+    }
+
+    return "credit_card";
   }
 
   return null;

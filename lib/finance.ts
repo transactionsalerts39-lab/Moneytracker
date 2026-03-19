@@ -314,11 +314,10 @@ export function getDashboardMetrics(transactions: Transaction[], billingCycleSta
 }
 
 export function getDashboardDateRangeMetrics(transactions: Transaction[]) {
-  const activeRows = transactions.filter((transaction) => transaction.status === "active");
-  const spendRows = activeRows.filter((transaction) => !transaction.excludedFromSpend && transaction.direction === "debit");
-  const creditRows = activeRows.filter((transaction) => transaction.direction === "credit");
+  const spendRows = getSpendAnalyticsRows(transactions, true);
+  const creditRows = transactions.filter((transaction) => transaction.direction === "credit");
   const totalCredits = creditRows.reduce((total, row) => total + Math.abs(row.signedAmount), 0);
-  const netFlow = activeRows.reduce((total, row) => total + row.signedAmount, 0);
+  const netFlow = creditRows.reduce((total, row) => total + Math.abs(row.signedAmount), 0) - sumSpend(spendRows);
 
   return {
     totalSpend: sumSpend(spendRows),
@@ -423,10 +422,8 @@ export function matchesTransactionPreset(
   }
 }
 
-export function buildWeeklySeries(transactions: Transaction[]) {
-  const spendRows = transactions.filter(
-    (row) => !row.excludedFromSpend && row.direction === "debit" && row.status === "active",
-  );
+export function buildWeeklySeries(transactions: Transaction[], includePendingReview = false) {
+  const spendRows = getSpendAnalyticsRows(transactions, includePendingReview);
   const grouped = new Map<string, { total: number; weekStart: string }>();
 
   for (const row of spendRows) {
@@ -450,13 +447,11 @@ export function buildWeeklySeries(transactions: Transaction[]) {
   }));
 }
 
-export function buildCategorySeries(transactions: Transaction[]) {
+export function buildCategorySeries(transactions: Transaction[], includePendingReview = false) {
+  const spendRows = getSpendAnalyticsRows(transactions, includePendingReview);
   const grouped = new Map<string, number>();
 
-  for (const row of transactions) {
-    if (row.excludedFromSpend || row.direction !== "debit" || row.status !== "active") {
-      continue;
-    }
+  for (const row of spendRows) {
     grouped.set(row.category, (grouped.get(row.category) ?? 0) + Math.abs(row.signedAmount));
   }
 
@@ -466,10 +461,8 @@ export function buildCategorySeries(transactions: Transaction[]) {
     .slice(0, 6);
 }
 
-export function buildSourceSplit(transactions: Transaction[]) {
-  const spendRows = transactions.filter(
-    (row) => !row.excludedFromSpend && row.direction === "debit" && row.status === "active",
-  );
+export function buildSourceSplit(transactions: Transaction[], includePendingReview = false) {
+  const spendRows = getSpendAnalyticsRows(transactions, includePendingReview);
   const savings = sumSpend(spendRows.filter((row) => row.sourceType === "savings"));
   const creditCard = sumSpend(spendRows.filter((row) => row.sourceType === "credit_card"));
 
@@ -479,26 +472,22 @@ export function buildSourceSplit(transactions: Transaction[]) {
   ];
 }
 
-export function buildMonthSeries(transactions: Transaction[]) {
+export function buildMonthSeries(transactions: Transaction[], includePendingReview = false) {
+  const spendRows = getSpendAnalyticsRows(transactions, includePendingReview);
   const grouped = new Map<string, number>();
 
-  for (const row of transactions) {
-    if (row.excludedFromSpend || row.direction !== "debit" || row.status !== "active") {
-      continue;
-    }
+  for (const row of spendRows) {
     grouped.set(row.monthLabel, (grouped.get(row.monthLabel) ?? 0) + Math.abs(row.signedAmount));
   }
 
   return Array.from(grouped.entries()).map(([label, total]) => ({ label, total }));
 }
 
-export function getTopMerchants(transactions: Transaction[]) {
+export function getTopMerchants(transactions: Transaction[], includePendingReview = false) {
+  const spendRows = getSpendAnalyticsRows(transactions, includePendingReview);
   const grouped = new Map<string, number>();
 
-  for (const row of transactions) {
-    if (row.excludedFromSpend || row.direction !== "debit" || row.status !== "active") {
-      continue;
-    }
+  for (const row of spendRows) {
     const merchantLabel = getTransactionMerchantLabel(row);
 
     grouped.set(merchantLabel, (grouped.get(merchantLabel) ?? 0) + Math.abs(row.signedAmount));
@@ -515,11 +504,25 @@ export function getReviewRows(rows: RawImportedRow[]) {
 }
 
 export function getBatchHeadline(batch: ImportBatch) {
-  return `${batch.rowsImported} imported • ${batch.duplicatesSkipped} duplicates • ${batch.rowsFlaggedForReview} review`;
+  return `${batch.rowsImported} net new • ${batch.duplicatesSkipped} exact overlaps • ${batch.rowsFlaggedForReview} review`;
 }
 
 function sumSpend(rows: Transaction[]) {
   return rows.reduce((total, row) => total + Math.abs(row.signedAmount), 0);
+}
+
+function getSpendAnalyticsRows(transactions: Transaction[], includePendingReview = false) {
+  return transactions.filter((transaction) => {
+    if (transaction.direction !== "debit" || transaction.excludedFromSpend) {
+      return false;
+    }
+
+    if (transaction.status === "active") {
+      return true;
+    }
+
+    return includePendingReview && transaction.status === "pending_review";
+  });
 }
 
 function clampBillingCycleStartDay(day: number) {

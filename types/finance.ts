@@ -42,6 +42,7 @@ export type ImportBatch = {
   sourceType: SourceType;
   fileName: string;
   fileType: StatementFileType;
+  fileSizeBytes?: number;
   statementPeriodStart?: string;
   statementPeriodEnd?: string;
   totalRawRows: number;
@@ -109,9 +110,24 @@ export type FileMapping = {
 
 export type UploadDraft = {
   id: string;
-  sourceType: SourceType;
+  sourceType: SourceType | "auto";
   fileName: string;
   fileType: StatementFileType | "unknown";
   fileSize: number;
   uploadedAt: string;
+};
+
+export type StoredStatementFile = {
+  id: string;
+  batchId: string;
+  uploadedAt: string;
+  sourceType: SourceType;
+  fileName: string;
+  fileType: StatementFileType;
+  mimeType: string;
+  sizeBytes: number;
+  lastModified: number;
+  statementPeriodStart?: string;
+  statementPeriodEnd?: string;
+  blob: Blob;
 };

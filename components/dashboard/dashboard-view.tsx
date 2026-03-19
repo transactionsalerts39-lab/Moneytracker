@@ -1,13 +1,33 @@
 "use client";
 
 import { useState } from "react";
+import {
+  addDays,
+  endOfMonth,
+  endOfWeek,
+  format as formatDate,
+  isAfter,
+  isBefore,
+  isSameDay,
+  isSameMonth,
+  isWithinInterval,
+  parseISO,
+  startOfMonth,
+  startOfWeek,
+  subMonths,
+  addMonths,
+} from "date-fns";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
+import { Popover } from "@base-ui/react/popover";
 import {
   ArrowDownRight,
   ArrowUpRight,
   CalendarRange,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CreditCard,
   Landmark,
   Sparkles,
@@ -32,7 +52,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   buildCategorySeries,
   buildMonthSeries,
@@ -93,11 +112,12 @@ function useDashboardData() {
   const scopedTransactions = filterTransactionsByDateRange(transactions, normalizedRange.fromDate, normalizedRange.toDate);
   const metrics = getDashboardMetrics(transactions, billingCycleStartDay);
   const rangeMetrics = normalizedRange.isActive ? getDashboardDateRangeMetrics(scopedTransactions) : null;
-  const weeklySeries = buildWeeklySeries(scopedTransactions);
-  const categorySeries = buildCategorySeries(scopedTransactions);
-  const sourceSplit = buildSourceSplit(scopedTransactions);
-  const monthSeries = buildMonthSeries(scopedTransactions);
-  const merchants = getTopMerchants(scopedTransactions);
+  const includePendingReviewInRange = normalizedRange.isActive;
+  const weeklySeries = buildWeeklySeries(scopedTransactions, includePendingReviewInRange);
+  const categorySeries = buildCategorySeries(scopedTransactions, includePendingReviewInRange);
+  const sourceSplit = buildSourceSplit(scopedTransactions, includePendingReviewInRange);
+  const monthSeries = buildMonthSeries(scopedTransactions, includePendingReviewInRange);
+  const merchants = getTopMerchants(scopedTransactions, includePendingReviewInRange);
   const dateRangeLabel = formatDateRangeLabel(normalizedRange.fromDate, normalizedRange.toDate);
   const buildTransactionsHref = (params: Record<string, string>) => {
     const query = new URLSearchParams(params);
@@ -132,27 +152,13 @@ function useDashboardData() {
           matchingCount: rangeMetrics.spendTransactionCount,
         },
         {
-          label: "Credits in range",
-          value: formatCurrency(rangeMetrics.totalCredits),
-          icon: ArrowUpRight,
-          tone: "text-emerald-600",
-          href: buildTransactionsHref({ flow: "incoming" }),
-          matchingCount: rangeMetrics.creditTransactionCount,
-        },
-        {
-          label: "Net flow",
-          value: formatCurrency(rangeMetrics.netFlow),
-          icon: TrendingUp,
-          tone: rangeMetrics.netFlow < 0 ? "text-rose-500" : "text-emerald-600",
-          matchingCount: null,
-        },
-        {
-          label: "Transactions in range",
-          value: `${rangeMetrics.transactionCount}`,
+          label: "Expense transactions",
+          value: `${rangeMetrics.spendTransactionCount}`,
           icon: Sparkles,
           tone: "text-slate-900",
-          href: buildTransactionsHref({}),
-          matchingCount: rangeMetrics.transactionCount,
+          href: buildTransactionsHref({ flow: "outgoing" }),
+          detail: "Included debit spend only",
+          matchingCount: rangeMetrics.spendTransactionCount,
         },
         {
           label: "Savings spend",
@@ -164,8 +170,8 @@ function useDashboardData() {
             (transaction) =>
               transaction.sourceType === "savings" &&
               transaction.direction === "debit" &&
-              transaction.status === "active" &&
-              !transaction.excludedFromSpend,
+              !transaction.excludedFromSpend &&
+              transaction.status !== "excluded",
           ).length,
         },
         {
@@ -178,9 +184,18 @@ function useDashboardData() {
             (transaction) =>
               transaction.sourceType === "credit_card" &&
               transaction.direction === "debit" &&
-              transaction.status === "active" &&
-              !transaction.excludedFromSpend,
+              !transaction.excludedFromSpend &&
+              transaction.status !== "excluded",
           ).length,
+        },
+        {
+          label: "Pending review",
+          value: `${rangeMetrics.pendingReviewCount}`,
+          icon: TrendingUp,
+          tone: rangeMetrics.pendingReviewCount > 0 ? "text-amber-600" : "text-slate-400",
+          detail: "Rows still needing confirmation",
+          href: rangeMetrics.pendingReviewCount > 0 ? buildTransactionsHref({}) : undefined,
+          matchingCount: null,
         },
       ]
     : [
@@ -312,7 +327,7 @@ function DesktopDashboardView({
           </p>
         </div>
         <div className="space-y-3">
-          <DashboardDateRangeControls
+          <DashboardDateRangePicker
             fromDate={fromDate}
             setFromDate={setFromDate}
             toDate={toDate}
@@ -390,32 +405,51 @@ function DesktopDashboardView({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
-            <InsightRow
-              label={isDateRangeActive ? "Top category in range" : "Top category this month"}
-              value={`${(rangeMetrics ?? metrics).topCategory.name} • ${formatCurrency((rangeMetrics ?? metrics).topCategory.amount)}`}
-            />
-            <InsightRow
-              label="Biggest merchant"
-              value={`${(rangeMetrics ?? metrics).biggestMerchant.name} • ${formatCurrency((rangeMetrics ?? metrics).biggestMerchant.amount)}`}
-            />
-            <InsightRow
-              label={isDateRangeActive ? "Largest transaction in range" : "Largest transaction this week"}
-              value={
-                (rangeMetrics ?? metrics).largestTransaction
-                  ? `${(rangeMetrics ?? metrics).largestTransaction.merchant} • ${formatCurrency(Math.abs((rangeMetrics ?? metrics).largestTransaction.signedAmount))}`
-                  : "No spend yet"
-              }
-            />
-            <InsightRow
-              label={isDateRangeActive ? "Pending review" : "Spend mix"}
-              value={
-                isDateRangeActive
-                  ? `${rangeMetrics?.pendingReviewCount ?? 0} transactions still need review`
-                  : metrics.creditCardSpend > metrics.savingsSpend
-                    ? "Card-heavy this month"
-                    : "Bank-heavy this month"
-              }
-            />
+            {isDateRangeActive && rangeMetrics ? (
+              <>
+                <InsightRow
+                  label="Top expense category"
+                  value={`${rangeMetrics.topCategory.name} • ${formatCurrency(rangeMetrics.topCategory.amount)}`}
+                />
+                <InsightRow
+                  label="Biggest expense merchant"
+                  value={`${rangeMetrics.biggestMerchant.name} • ${formatCurrency(rangeMetrics.biggestMerchant.amount)}`}
+                />
+                <InsightRow
+                  label="Income in range"
+                  value={
+                    rangeMetrics.creditTransactionCount > 0
+                      ? `${formatCurrency(rangeMetrics.totalCredits)} • ${rangeMetrics.creditTransactionCount} incoming transactions`
+                      : "No incoming money in this window"
+                  }
+                />
+                <InsightRow
+                  label="Net cash impact"
+                  value={
+                    rangeMetrics.totalCredits > 0 || rangeMetrics.totalSpend > 0
+                      ? `${formatCurrency(rangeMetrics.netFlow)} • credits minus spend`
+                      : "No cash movement in this window"
+                  }
+                />
+              </>
+            ) : (
+              <>
+                <InsightRow label="Top category this month" value={`${metrics.topCategory.name} • ${formatCurrency(metrics.topCategory.amount)}`} />
+                <InsightRow label="Biggest merchant" value={`${metrics.biggestMerchant.name} • ${formatCurrency(metrics.biggestMerchant.amount)}`} />
+                <InsightRow
+                  label="Largest transaction this week"
+                  value={
+                    metrics.largestTransaction
+                      ? `${metrics.largestTransaction.merchant} • ${formatCurrency(Math.abs(metrics.largestTransaction.signedAmount))}`
+                      : "No spend yet"
+                  }
+                />
+                <InsightRow
+                  label="Spend mix"
+                  value={metrics.creditCardSpend > metrics.savingsSpend ? "Card-heavy this month" : "Bank-heavy this month"}
+                />
+              </>
+            )}
           </CardContent>
         </Card>
       </section>
@@ -549,7 +583,7 @@ function MobileDashboardView({
           ) : null}
         </div>
         <div className="mt-4">
-          <DashboardDateRangeControls
+          <DashboardDateRangePicker
             fromDate={fromDate}
             setFromDate={setFromDate}
             toDate={toDate}
@@ -574,22 +608,39 @@ function MobileDashboardView({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <InsightRow
-            label="Top category"
-            value={`${(rangeMetrics ?? metrics).topCategory.name} • ${formatCurrency((rangeMetrics ?? metrics).topCategory.amount)}`}
-          />
-          <InsightRow
-            label="Biggest merchant"
-            value={`${(rangeMetrics ?? metrics).biggestMerchant.name} • ${formatCurrency((rangeMetrics ?? metrics).biggestMerchant.amount)}`}
-          />
-          <InsightRow
-            label={isDateRangeActive ? "Pending review" : "Card cycle"}
-            value={
-              isDateRangeActive
-                ? `${rangeMetrics?.pendingReviewCount ?? 0} transactions`
-                : `${formatCurrency(metrics.currentBillingCycle.amountDue)} • ${metrics.currentBillingCycle.window.activeRangeLabel}`
-            }
-          />
+          {isDateRangeActive && rangeMetrics ? (
+            <>
+              <InsightRow
+                label="Top expense category"
+                value={`${rangeMetrics.topCategory.name} • ${formatCurrency(rangeMetrics.topCategory.amount)}`}
+              />
+              <InsightRow
+                label="Income in range"
+                value={
+                  rangeMetrics.creditTransactionCount > 0
+                    ? `${formatCurrency(rangeMetrics.totalCredits)} • ${rangeMetrics.creditTransactionCount} incoming`
+                    : "No incoming money"
+                }
+              />
+              <InsightRow
+                label="Net cash impact"
+                value={
+                  rangeMetrics.totalCredits > 0 || rangeMetrics.totalSpend > 0
+                    ? `${formatCurrency(rangeMetrics.netFlow)} • credits minus spend`
+                    : "No cash movement"
+                }
+              />
+            </>
+          ) : (
+            <>
+              <InsightRow label="Top category" value={`${metrics.topCategory.name} • ${formatCurrency(metrics.topCategory.amount)}`} />
+              <InsightRow label="Biggest merchant" value={`${metrics.biggestMerchant.name} • ${formatCurrency(metrics.biggestMerchant.amount)}`} />
+              <InsightRow
+                label="Card cycle"
+                value={`${formatCurrency(metrics.currentBillingCycle.amountDue)} • ${metrics.currentBillingCycle.window.activeRangeLabel}`}
+              />
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -719,7 +770,7 @@ function KpiCard({ kpi, compact = false }: { kpi: DashboardKpi; compact?: boolea
   );
 }
 
-function DashboardDateRangeControls({
+function DashboardDateRangePicker({
   fromDate,
   setFromDate,
   toDate,
@@ -734,42 +785,208 @@ function DashboardDateRangeControls({
   clearDateRange: () => void;
   compact: boolean;
 }) {
-  return (
-    <div
-      className={cn(
-        "flex flex-wrap items-end gap-2 rounded-[20px] border border-slate-200 bg-slate-50/90 p-2.5",
-        compact ? "w-full" : "justify-end",
-      )}
-    >
-      <label className="space-y-1 px-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
-        Start
-        <Input
-          type="date"
-          value={fromDate}
-          onChange={(event) => setFromDate(event.target.value)}
-          className={cn("rounded-xl border-slate-200 bg-white text-sm", compact ? "h-10 w-full min-w-[136px]" : "h-9 w-[148px]")}
-        />
-      </label>
-      <label className="space-y-1 px-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
-        End
-        <Input
-          type="date"
-          value={toDate}
-          onChange={(event) => setToDate(event.target.value)}
-          className={cn("rounded-xl border-slate-200 bg-white text-sm", compact ? "h-10 w-full min-w-[136px]" : "h-9 w-[148px]")}
-        />
-      </label>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="mb-0.5 rounded-xl px-3 text-slate-600 hover:bg-white"
-        onClick={clearDateRange}
-      >
-        Clear dates
-      </Button>
-    </div>
+  const [open, setOpen] = useState(false);
+  const selectedStartDate = fromDate ? parseISO(fromDate) : null;
+  const selectedEndDate = toDate ? parseISO(toDate) : null;
+  const [displayMonth, setDisplayMonth] = useState(() =>
+    startOfMonth(selectedStartDate ?? selectedEndDate ?? new Date()),
   );
+  const hasActiveRange = Boolean(fromDate || toDate);
+  const label = hasActiveRange ? formatDateRangeLabel(fromDate, toDate) : "Custom dates";
+  const calendarWeeks = buildCalendarWeeks(displayMonth);
+
+  const handleDaySelect = (day: Date) => {
+    const selectedIsoDate = formatDate(day, "yyyy-MM-dd");
+
+    if (!selectedStartDate || selectedEndDate) {
+      setFromDate(selectedIsoDate);
+      setToDate("");
+      return;
+    }
+
+    if (isBefore(day, selectedStartDate)) {
+      setFromDate(selectedIsoDate);
+      return;
+    }
+
+    setToDate(selectedIsoDate);
+    setOpen(false);
+  };
+
+  const handleClear = () => {
+    clearDateRange();
+    setOpen(false);
+  };
+
+  return (
+    <Popover.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+
+        if (nextOpen) {
+          setDisplayMonth(startOfMonth(selectedStartDate ?? selectedEndDate ?? new Date()));
+        }
+      }}
+    >
+      <Popover.Trigger
+        className={cn(
+          "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition outline-none",
+          "border-slate-200 bg-white/90 text-slate-700 shadow-sm hover:border-slate-300 hover:bg-white",
+          "focus-visible:border-slate-400 focus-visible:ring-2 focus-visible:ring-slate-200",
+          compact ? "w-full justify-between px-3.5 py-2.5" : "self-end",
+        )}
+      >
+        <span className="inline-flex items-center gap-2">
+          <span className={cn("rounded-full p-1", hasActiveRange ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+            <CalendarRange className="size-3.5" />
+          </span>
+          <span className="truncate">{label}</span>
+        </span>
+        <span className="inline-flex items-center gap-1 text-slate-400">
+          {hasActiveRange ? (
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Live
+            </span>
+          ) : null}
+          <ChevronDown className={cn("size-4 transition", open && "rotate-180")} />
+        </span>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Positioner sideOffset={10} align={compact ? "center" : "end"} className="z-50">
+          <Popover.Popup
+            initialFocus
+            className={cn(
+              "w-[min(92vw,360px)] rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_24px_60px_rgba(15,23,42,0.14)] outline-none",
+              "data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            )}
+          >
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-1">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Date range</p>
+                  <p className="mt-1 text-sm font-medium text-slate-800">{label}</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="inline-flex size-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                    onClick={() => setDisplayMonth((currentMonth) => subMonths(currentMonth, 1))}
+                    aria-label="Previous month"
+                  >
+                    <ChevronLeft className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex size-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                    onClick={() => setDisplayMonth((currentMonth) => addMonths(currentMonth, 1))}
+                    aria-label="Next month"
+                  >
+                    <ChevronRight className="size-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-[22px] bg-slate-50 px-3 py-3">
+                <div className="flex items-center justify-between px-1">
+                  <p className="text-lg font-semibold tracking-tight text-slate-900">{formatDate(displayMonth, "MMMM yyyy")}</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    {selectedStartDate && !selectedEndDate ? "Select end" : "Select range"}
+                  </p>
+                </div>
+
+                <div className="mt-4 grid grid-cols-7 gap-y-2 text-center text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+                  {WEEKDAY_LABELS.map((weekday) => (
+                    <span key={weekday}>{weekday}</span>
+                  ))}
+                </div>
+
+                <div className="mt-2 space-y-1.5">
+                  {calendarWeeks.map((week) => (
+                    <div key={week[0].toISOString()} className="grid grid-cols-7 gap-0.5">
+                      {week.map((day, dayIndex) => {
+                        const isCurrentMonth = isSameMonth(day, displayMonth);
+                        const isSelectedStart = Boolean(selectedStartDate && isSameDay(day, selectedStartDate));
+                        const isSelectedEnd = Boolean(selectedEndDate && isSameDay(day, selectedEndDate));
+                        const isRangeDay = Boolean(
+                          selectedStartDate &&
+                            selectedEndDate &&
+                            isWithinInterval(day, { start: selectedStartDate, end: selectedEndDate }),
+                        );
+                        const isPreviewDay = Boolean(selectedStartDate && !selectedEndDate && isSameDay(day, selectedStartDate));
+
+                        return (
+                          <div
+                            key={day.toISOString()}
+                            className={cn(
+                              "flex h-10 items-center justify-center",
+                              (isRangeDay || isPreviewDay) && "bg-sky-100/90",
+                              (isSelectedStart || (isRangeDay && dayIndex === 0)) && "rounded-l-full",
+                              (isSelectedEnd || (isRangeDay && dayIndex === 6) || isPreviewDay) && "rounded-r-full",
+                            )}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleDaySelect(day)}
+                              className={cn(
+                                "flex size-9 items-center justify-center rounded-full text-sm font-medium transition",
+                                isSelectedStart || isSelectedEnd
+                                  ? "bg-sky-500 text-white shadow-[0_8px_18px_rgba(14,116,144,0.28)]"
+                                  : isRangeDay
+                                    ? "text-sky-900 hover:bg-sky-200/80"
+                                    : "text-slate-700 hover:bg-white",
+                                !isCurrentMonth && !(isSelectedStart || isSelectedEnd) && "text-slate-300",
+                                selectedStartDate &&
+                                  !selectedEndDate &&
+                                  isAfter(day, selectedStartDate) &&
+                                  "hover:bg-sky-100 hover:text-sky-900",
+                              )}
+                              aria-pressed={isSelectedStart || isSelectedEnd}
+                            >
+                              {formatDate(day, "d")}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2">
+                <Button type="button" variant="outline" size="sm" className="rounded-full px-3" onClick={handleClear}>
+                  Clear
+                </Button>
+              </div>
+            </div>
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function buildCalendarWeeks(displayMonth: Date) {
+  const calendarStart = startOfWeek(startOfMonth(displayMonth), { weekStartsOn: 1 });
+  const calendarEnd = endOfWeek(endOfMonth(displayMonth), { weekStartsOn: 1 });
+  const weeks: Date[][] = [];
+
+  let currentDay = calendarStart;
+
+  while (currentDay <= calendarEnd) {
+    const week: Date[] = [];
+
+    for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+      week.push(currentDay);
+      currentDay = addDays(currentDay, 1);
+    }
+
+    weeks.push(week);
+  }
+
+  return weeks;
 }
 
 function SourceSplitCard({
