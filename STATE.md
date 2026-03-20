@@ -2,7 +2,7 @@
 
 ## Current status
 
-Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus a device-aware mobile UI split, billing-cycle-aware card totals, a dashboard-level custom date range filter, preserved uploaded statement copies in IndexedDB, auto-detected single-entry uploads, upload/settings storage visibility, improved transactions/upload UX, cleaner savings UPI merchant/display labels, durable transaction notes/tags stored against canonical fingerprints, and income-specific analytics cards.
+Usable local MVP shell with real upload/import wiring for ICICI PDF statements and tabular file scaffolding, plus a device-aware mobile UI split, billing-cycle-aware card totals, a dashboard-level custom date range filter, preserved uploaded statement copies in IndexedDB, auto-detected single-entry uploads, upload/settings storage visibility, improved transactions/upload UX, cleaner savings UPI merchant/display labels, durable transaction notes/tags stored against canonical fingerprints, income-specific analytics cards, and chronologically sorted weekly/monthly dashboard trend series that no longer depend on import order.
 
 ## What is working
 
@@ -27,7 +27,11 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 - Transaction search now matches note/tag metadata, the ledger surfaces note/tag badges on desktop and mobile, and the transaction detail sheet allows local note/tag editing
 - Transaction detail now leads with a compact summary, keeps comment/tags immediately accessible, and hides lower-value import metadata behind a single expandable details section
 - Transactions can now also be filtered directly by annotation state on desktop and mobile (`With comment`, `With tags`, `With both`) so annotated rows are easy to isolate without relying on search text
-- Dashboard analytics now expose dedicated income KPIs (`Income this month` and `Income in range`) using only active transactions categorized as `Income`, while net cash impact still uses all incoming credits where appropriate
+- Dashboard analytics now expose dedicated income KPIs (`Income this month` and `Income in range`) using all incoming credit transactions in scope, while net cash impact continues to compare those incoming credits against outgoing totals
+- Weekly spend and monthly trend charts now group by canonical `weekStart` / `monthStart` keys and sort by those ISO dates, with the weekly chart rendered newest-first from left to right so the current week stays immediately visible instead of trailing at the far right
+- Weekly spend cards on desktop and mobile now allow horizontal scrolling once the bucket count outgrows the card width, so older and newer weeks remain reachable without compressing labels into unreadable bars
+- Weekly spend bars now total every outgoing debit in the Monday-Sunday bucket and drill into `Transactions` using the same week-plus-outgoing rule, so the chart matches the ledger slice the user sees for that period
+- Default and custom-range dashboard KPI cards now follow the same flow-based rule: outgoing cards total all debit transactions in scope, income cards total all incoming credit transactions in scope, and the linked drill-downs use matching `flow=outgoing` / `flow=incoming` filters instead of narrower spend-only or `category=Income` logic
 
 ## What is partially working
 
@@ -79,4 +83,4 @@ Usable local MVP shell with real upload/import wiring for ICICI PDF statements a
 
 ## Last updated
 
-2026-03-19
+2026-03-20

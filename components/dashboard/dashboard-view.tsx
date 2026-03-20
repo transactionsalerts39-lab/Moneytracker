@@ -156,8 +156,8 @@ function useDashboardData() {
           value: formatCurrency(rangeMetrics.incomeTotal),
           icon: ArrowUpRight,
           tone: "text-emerald-600",
-          href: buildTransactionsHref({ flow: "incoming", category: "Income" }),
-          detail: "Active income only",
+          href: buildTransactionsHref({ flow: "incoming" }),
+          detail: "All incoming transactions",
           matchingCount: rangeMetrics.incomeTransactionCount,
         },
         {
@@ -166,7 +166,7 @@ function useDashboardData() {
           icon: Sparkles,
           tone: "text-slate-900",
           href: buildTransactionsHref({ flow: "outgoing" }),
-          detail: "Included debit spend only",
+          detail: "All outgoing debits",
           matchingCount: rangeMetrics.spendTransactionCount,
         },
         {
@@ -178,9 +178,7 @@ function useDashboardData() {
           matchingCount: scopedTransactions.filter(
             (transaction) =>
               transaction.sourceType === "savings" &&
-              transaction.direction === "debit" &&
-              !transaction.excludedFromSpend &&
-              transaction.status !== "excluded",
+              transaction.direction === "debit",
           ).length,
         },
         {
@@ -192,9 +190,7 @@ function useDashboardData() {
           matchingCount: scopedTransactions.filter(
             (transaction) =>
               transaction.sourceType === "credit_card" &&
-              transaction.direction === "debit" &&
-              !transaction.excludedFromSpend &&
-              transaction.status !== "excluded",
+              transaction.direction === "debit",
           ).length,
         },
         {
@@ -250,8 +246,8 @@ function useDashboardData() {
           value: formatCurrency(metrics.incomeThisMonth),
           icon: ArrowUpRight,
           tone: "text-emerald-600",
-          href: "/transactions?flow=incoming&category=Income",
-          detail: "Active income only",
+          href: "/transactions?flow=incoming",
+          detail: "All incoming transactions",
           matchingCount: metrics.incomeTransactionCount,
         },
         {
@@ -385,33 +381,35 @@ function DesktopDashboardView({
                 : "Monday-Sunday buckets derived from transaction dates, not upload timestamps."}
             </CardDescription>
           </CardHeader>
-          <CardContent className="h-[320px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklySeries}>
-                <CartesianGrid stroke="#e2e8f0" vertical={false} />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 12 }} />
-                <YAxis
-                  tickFormatter={(value) => formatCompactCurrency(value)}
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fill: "#64748b", fontSize: 12 }}
-                />
-                <Tooltip formatter={(value) => formatTooltipValue(value)} />
-                <Bar
-                  dataKey="total"
-                  radius={[12, 12, 0, 0]}
-                  fill="#0f172a"
-                  className="cursor-pointer"
-                  onClick={(entry) => {
-                    const weekStart = (entry as { weekStart?: string } | undefined)?.weekStart;
+          <CardContent className="overflow-x-auto pb-2">
+            <div className="h-[320px] min-w-full" style={{ width: getScrollableChartWidth(weeklySeries.length, 720, 112) }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={weeklySeries}>
+                  <CartesianGrid stroke="#e2e8f0" vertical={false} />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 12 }} />
+                  <YAxis
+                    tickFormatter={(value) => formatCompactCurrency(value)}
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fill: "#64748b", fontSize: 12 }}
+                  />
+                  <Tooltip formatter={(value) => formatTooltipValue(value)} />
+                  <Bar
+                    dataKey="total"
+                    radius={[12, 12, 0, 0]}
+                    fill="#0f172a"
+                    className="cursor-pointer"
+                    onClick={(entry) => {
+                      const weekStart = (entry as { weekStart?: string } | undefined)?.weekStart;
 
-                    if (weekStart) {
-                      goToTransactions({ weekStart, flow: "outgoing" });
-                    }
-                  }}
-                />
-              </BarChart>
-            </ResponsiveContainer>
+                      if (weekStart) {
+                        goToTransactions({ weekStart, flow: "outgoing" });
+                      }
+                    }}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </CardContent>
         </Card>
 
@@ -669,27 +667,29 @@ function MobileDashboardView({
             {isDateRangeActive ? "Tap a bar to open that week inside the selected date window." : "Tap a bar to open the matching ledger slice."}
           </CardDescription>
         </CardHeader>
-        <CardContent className="h-[240px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={weeklySeries}>
-              <CartesianGrid stroke="#e2e8f0" vertical={false} />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 11 }} />
-              <YAxis hide />
-              <Tooltip formatter={(value) => formatTooltipValue(value)} />
-              <Bar
-                dataKey="total"
-                radius={[12, 12, 0, 0]}
-                fill="#0f172a"
-                onClick={(entry) => {
-                  const weekStart = (entry as { weekStart?: string } | undefined)?.weekStart;
+        <CardContent className="overflow-x-auto pb-2">
+          <div className="h-[240px] min-w-full" style={{ width: getScrollableChartWidth(weeklySeries.length, 520, 92) }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={weeklySeries}>
+                <CartesianGrid stroke="#e2e8f0" vertical={false} />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 11 }} />
+                <YAxis hide />
+                <Tooltip formatter={(value) => formatTooltipValue(value)} />
+                <Bar
+                  dataKey="total"
+                  radius={[12, 12, 0, 0]}
+                  fill="#0f172a"
+                  onClick={(entry) => {
+                    const weekStart = (entry as { weekStart?: string } | undefined)?.weekStart;
 
-                  if (weekStart) {
-                    goToTransactions({ weekStart, flow: "outgoing" });
-                  }
-                }}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+                    if (weekStart) {
+                      goToTransactions({ weekStart, flow: "outgoing" });
+                    }
+                  }}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </CardContent>
       </Card>
 
@@ -1130,4 +1130,8 @@ function formatTooltipValue(value: string | number | readonly (string | number)[
   }
 
   return value ?? "N/A";
+}
+
+function getScrollableChartWidth(bucketCount: number, minimumWidth: number, bucketWidth: number) {
+  return `${Math.max(minimumWidth, bucketCount * bucketWidth)}px`;
 }

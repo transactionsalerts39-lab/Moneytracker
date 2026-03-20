@@ -250,13 +250,8 @@ export function getThisWeekComparisonWindow(today = new Date()) {
 }
 
 export function getDashboardMetrics(transactions: Transaction[], billingCycleStartDay = 25) {
-  const spendRows = transactions.filter(
-    (transaction) =>
-      !transaction.excludedFromSpend &&
-      transaction.direction === "debit" &&
-      transaction.status === "active",
-  );
-  const incomeRows = getIncomeAnalyticsRows(transactions);
+  const outgoingRows = getOutgoingAnalyticsRows(transactions);
+  const incomingRows = getIncomingAnalyticsRows(transactions);
   const now = new Date();
   const { currentStart, lastStart, weekdayIndex } = getThisWeekComparisonWindow(now);
   const currentEnd = new Date(currentStart);
@@ -265,16 +260,16 @@ export function getDashboardMetrics(transactions: Transaction[], billingCycleSta
   lastEnd.setDate(lastStart.getDate() + weekdayIndex);
   const monthStart = startOfMonth(now);
 
-  const currentWeekRows = spendRows.filter((row) => {
+  const currentWeekRows = outgoingRows.filter((row) => {
     const date = parseISO(row.date);
     return date >= currentStart && date <= currentEnd;
   });
-  const lastWeekRows = spendRows.filter((row) => {
+  const lastWeekRows = outgoingRows.filter((row) => {
     const date = parseISO(row.date);
     return date >= lastStart && date <= lastEnd;
   });
-  const mtdRows = spendRows.filter((row) => parseISO(row.date) >= monthStart);
-  const mtdIncomeRows = incomeRows.filter((row) => parseISO(row.date) >= monthStart);
+  const mtdRows = outgoingRows.filter((row) => parseISO(row.date) >= monthStart);
+  const mtdIncomeRows = incomingRows.filter((row) => parseISO(row.date) >= monthStart);
 
   const currentWeek = sumSpend(currentWeekRows);
   const lastWeek = sumSpend(lastWeekRows);
@@ -318,26 +313,25 @@ export function getDashboardMetrics(transactions: Transaction[], billingCycleSta
 }
 
 export function getDashboardDateRangeMetrics(transactions: Transaction[]) {
-  const spendRows = getSpendAnalyticsRows(transactions, true);
-  const incomingRows = transactions.filter((transaction) => transaction.direction === "credit");
-  const incomeRows = getIncomeAnalyticsRows(transactions);
+  const outgoingRows = getOutgoingAnalyticsRows(transactions);
+  const incomingRows = getIncomingAnalyticsRows(transactions);
   const totalIncomingCredits = sumIncoming(incomingRows);
-  const netFlow = totalIncomingCredits - sumSpend(spendRows);
+  const netFlow = totalIncomingCredits - sumSpend(outgoingRows);
 
   return {
-    totalSpend: sumSpend(spendRows),
+    totalSpend: sumSpend(outgoingRows),
     totalIncomingCredits,
     netFlow,
-    incomeTotal: sumIncoming(incomeRows),
-    incomeTransactionCount: incomeRows.length,
-    savingsSpend: sumSpend(spendRows.filter((row) => row.sourceType === "savings")),
-    creditCardSpend: sumSpend(spendRows.filter((row) => row.sourceType === "credit_card")),
+    incomeTotal: totalIncomingCredits,
+    incomeTransactionCount: incomingRows.length,
+    savingsSpend: sumSpend(outgoingRows.filter((row) => row.sourceType === "savings")),
+    creditCardSpend: sumSpend(outgoingRows.filter((row) => row.sourceType === "credit_card")),
     transactionCount: transactions.length,
     pendingReviewCount: transactions.filter((transaction) => transaction.status === "pending_review").length,
-    topCategory: getTopGroup(spendRows, "category"),
-    biggestMerchant: getTopGroup(spendRows, "merchant"),
-    largestTransaction: spendRows.slice().sort((a, b) => Math.abs(b.signedAmount) - Math.abs(a.signedAmount))[0] ?? null,
-    spendTransactionCount: spendRows.length,
+    topCategory: getTopGroup(outgoingRows, "category"),
+    biggestMerchant: getTopGroup(outgoingRows, "merchant"),
+    largestTransaction: outgoingRows.slice().sort((a, b) => Math.abs(b.signedAmount) - Math.abs(a.signedAmount))[0] ?? null,
+    spendTransactionCount: outgoingRows.length,
   };
 }
 
@@ -346,27 +340,27 @@ export function getPresetMeta(preset: TransactionPreset, billingCycleStartDay = 
     case "spend-this-week":
       return {
         label: "Spend this week",
-        description: "Included outgoing transactions from the current week through today.",
+        description: "All outgoing transactions from the current week through today.",
       };
     case "spend-last-week":
       return {
         label: "Spend last week",
-        description: "Included outgoing transactions from the prior week through the same weekday.",
+        description: "All outgoing transactions from the prior week through the same weekday.",
       };
     case "month-to-date":
       return {
         label: "Month to date",
-        description: "Included outgoing transactions from the start of this month through today.",
+        description: "All outgoing transactions from the start of this month through today.",
       };
     case "savings-spend":
       return {
         label: "Savings spend",
-        description: "Included outgoing savings transactions from this month through today.",
+        description: "All outgoing savings transactions from this month through today.",
       };
     case "credit-card-spend":
       return {
         label: "Credit card spend",
-        description: "Included outgoing credit-card transactions from this month through today.",
+        description: "All outgoing credit-card transactions from this month through today.",
       };
     case "current-billing-cycle":
       return {
@@ -392,28 +386,25 @@ export function matchesTransactionPreset(
   lastEnd.setDate(lastStart.getDate() + weekdayIndex);
   const monthStart = startOfMonth(today);
   const billingCycleWindow = getBillingCycleWindow(billingCycleStartDay, today);
-  const isIncludedSpend =
-    !transaction.excludedFromSpend &&
-    transaction.direction === "debit" &&
-    transaction.status === "active";
+  const isOutgoing = transaction.direction === "debit";
 
   switch (preset) {
     case "spend-this-week":
-      return isIncludedSpend && transactionDate >= currentStart && transactionDate <= currentEnd;
+      return isOutgoing && transactionDate >= currentStart && transactionDate <= currentEnd;
     case "spend-last-week":
-      return isIncludedSpend && transactionDate >= lastStart && transactionDate <= lastEnd;
+      return isOutgoing && transactionDate >= lastStart && transactionDate <= lastEnd;
     case "month-to-date":
-      return isIncludedSpend && transactionDate >= monthStart && transactionDate <= today;
+      return isOutgoing && transactionDate >= monthStart && transactionDate <= today;
     case "savings-spend":
       return (
-        isIncludedSpend &&
+        isOutgoing &&
         transaction.sourceType === "savings" &&
         transactionDate >= monthStart &&
         transactionDate <= today
       );
     case "credit-card-spend":
       return (
-        isIncludedSpend &&
+        isOutgoing &&
         transaction.sourceType === "credit_card" &&
         transactionDate >= monthStart &&
         transactionDate <= today
@@ -429,28 +420,31 @@ export function matchesTransactionPreset(
 }
 
 export function buildWeeklySeries(transactions: Transaction[], includePendingReview = false) {
-  const spendRows = getSpendAnalyticsRows(transactions, includePendingReview);
-  const grouped = new Map<string, { total: number; weekStart: string }>();
+  void includePendingReview;
+  const spendRows = getOutgoingAnalyticsRows(transactions);
+  const grouped = new Map<string, { label: string; total: number }>();
 
   for (const row of spendRows) {
-    const current = grouped.get(row.weekLabel);
+    const current = grouped.get(row.weekStart);
 
     if (current) {
       current.total += Math.abs(row.signedAmount);
       continue;
     }
 
-    grouped.set(row.weekLabel, {
+    grouped.set(row.weekStart, {
+      label: row.weekLabel,
       total: Math.abs(row.signedAmount),
-      weekStart: row.weekStart,
     });
   }
 
-  return Array.from(grouped.entries()).map(([label, value]) => ({
-    label,
-    total: value.total,
-    weekStart: value.weekStart,
-  }));
+  return Array.from(grouped.entries())
+    .sort(([leftWeekStart], [rightWeekStart]) => rightWeekStart.localeCompare(leftWeekStart))
+    .map(([weekStart, value]) => ({
+      label: value.label,
+      total: value.total,
+      weekStart,
+    }));
 }
 
 export function buildCategorySeries(transactions: Transaction[], includePendingReview = false) {
@@ -480,13 +474,25 @@ export function buildSourceSplit(transactions: Transaction[], includePendingRevi
 
 export function buildMonthSeries(transactions: Transaction[], includePendingReview = false) {
   const spendRows = getSpendAnalyticsRows(transactions, includePendingReview);
-  const grouped = new Map<string, number>();
+  const grouped = new Map<string, { label: string; total: number }>();
 
   for (const row of spendRows) {
-    grouped.set(row.monthLabel, (grouped.get(row.monthLabel) ?? 0) + Math.abs(row.signedAmount));
+    const current = grouped.get(row.monthStart);
+
+    if (current) {
+      current.total += Math.abs(row.signedAmount);
+      continue;
+    }
+
+    grouped.set(row.monthStart, {
+      label: row.monthLabel,
+      total: Math.abs(row.signedAmount),
+    });
   }
 
-  return Array.from(grouped.entries()).map(([label, total]) => ({ label, total }));
+  return Array.from(grouped.entries())
+    .sort(([leftMonthStart], [rightMonthStart]) => leftMonthStart.localeCompare(rightMonthStart))
+    .map(([, value]) => ({ label: value.label, total: value.total }));
 }
 
 export function getTopMerchants(transactions: Transaction[], includePendingReview = false) {
@@ -535,13 +541,12 @@ function getSpendAnalyticsRows(transactions: Transaction[], includePendingReview
   });
 }
 
-function getIncomeAnalyticsRows(transactions: Transaction[]) {
-  return transactions.filter(
-    (transaction) =>
-      transaction.direction === "credit" &&
-      transaction.category === "Income" &&
-      transaction.status === "active",
-  );
+function getOutgoingAnalyticsRows(transactions: Transaction[]) {
+  return transactions.filter((transaction) => transaction.direction === "debit");
+}
+
+function getIncomingAnalyticsRows(transactions: Transaction[]) {
+  return transactions.filter((transaction) => transaction.direction === "credit");
 }
 
 function clampBillingCycleStartDay(day: number) {
